@@ -1,0 +1,27 @@
+[workspace]
+name = "headgate"
+version = "0.0.1"
+authors = ["Marius S <marius@seritan.net>"]
+description = "Privacy harness: a frontier model writes code that runs on private data locally; the data never leaves the machine. See README.md / PRIOR-ART.md."
+# Nightly Mojo, matching the rest of the millrace org. flare (HTTP transport) and
+# minja2 (templating) are sibling repos, pulled in via `-I` (see [tasks]).
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "*"
+
+[tasks]
+# The verified containment boundary (SPIKE.md). Pure shell + sandbox-exec — needs
+# no Mojo toolchain, so this runs even before `pixi install` finishes.
+spike = "./sandbox/spike.sh"
+
+# Build the harness. NOTE: src/ is structural scaffold (idiomatic Mojo, not yet
+# compiled) — these tasks are the intended build wiring, mirroring mojo-backend.
+# -I ../flare: HTTP client for the remote model + local inference-server.
+# -I ../minja2/src: JSON + prompt templating.
+build = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../minja2/src -o build/headgate" }
+run   = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../minja2/src -o build/headgate && ./build/headgate" }

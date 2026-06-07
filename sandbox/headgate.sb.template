@@ -1,0 +1,50 @@
+;; headgate code-runner confinement — macOS Seatbelt (sandbox-exec) profile.
+;;
+;; This is the CONTAINMENT half of headgate ("the sandbox owns containment").
+;; The generated code runs under this profile so that, even if the remote model
+;; emits careless or hostile code, it cannot exfiltrate private data or tamper
+;; with the host.
+;;
+;; Placeholders are substituted by the runner (src/sandbox.mojo) / the spike
+;; (sandbox/spike.sh) with CANONICAL (symlink-resolved) absolute paths:
+;;   @DATA_DIR@     read-only mount of the private data the task may touch
+;;   @SCRATCH_DIR@  the only writable location (results land here, local-only)
+;;   @HOME@         the invoking user's home — denied, so ~/.ssh etc. are unreadable
+;;
+;; Proven by `sandbox/spike.sh` (see SPIKE.md for results). NOTE the honest
+;; limitation documented there: read-scoping here is blocklist-style (deny @HOME@)
+;; layered on bsd.sb's broad system-read allow — a determined reader could still
+;; reach world-readable paths outside @HOME@. For a hard read-confinement
+;; guarantee, escalate to the microVM tier (PRIOR-ART.md), which this profile is
+;; the cheap first line in front of.
+
+(version 1)
+
+;; Baseline: the system bsd profile sets up the mach/IPC bootstrap a process
+;; needs to start. Without it, even /usr/bin/true aborts under deny-default.
+(import "/System/Library/Sandbox/Profiles/bsd.sb")
+
+;; Let the generated binary load and run — system libraries / dyld only.
+(allow process-fork)
+(allow process-exec*)
+(allow file-read* file-map-executable
+  (subpath "/usr/lib")
+  (subpath "/usr/bin")
+  (subpath "/bin")
+  (subpath "/System"))
+
+;; ── PRIMARY CONTAINMENT ───────────────────────────────────────────────────
+;; No network egress, full stop. This is the single most important control:
+;; generated code cannot phone home, so it cannot exfiltrate the private data.
+(deny network*)
+
+;; No writes anywhere except the designated scratch dir. Results are written
+;; there and stay local; the harness reads them back outside the sandbox.
+(deny file-write*)
+(allow file-write* (subpath "@SCRATCH_DIR@"))
+
+;; ── DEFENSE-IN-DEPTH: read-scoping ────────────────────────────────────────
+;; Deny the user's home (credentials, keys, browser data, other projects) ...
+(deny file-read* (subpath "@HOME@"))
+;; ... and allow only the scoped private-data dir, read-only.
+(allow file-read* (subpath "@DATA_DIR@"))

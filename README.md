@@ -100,6 +100,29 @@ through covert channels. That's a later, harder threat model.
 - **code sandbox** — executes generated code under a deny-network policy with a
   small capability broker; captures results/logs locally.
 
+## Layout
+
+```
+README.md / PRIOR-ART.md / SPIKE.md   design intent · prior-art survey · sandbox spike
+pixi.toml                             Mojo nightly + flare/minja2 wiring; `pixi run spike`
+sandbox/headgate.sb.template          PROVEN Seatbelt confinement profile
+sandbox/spike.sh                      6/6-passing containment proof (no toolchain needed)
+src/egress.mojo                       EgressGuard — outbound confidentiality chokepoint
+src/schema.mojo                       SchemaSanitizer — alias names + synthetic samples
+src/transport.mojo                    Local/Remote clients (remote gated by EgressGuard)
+src/sandbox.mojo + src/broker.mojo    containment runner + capability allowlist
+src/orchestrator.mojo                 core loop: synthetic-debug → real-run
+src/headgate.mojo                     composition root / demo
+```
+
 ## Status
 
-Early. This document is the design intent; implementation has not started.
+Early, but past "just a doc":
+
+- **Sandbox spike: done and verified.** The containment boundary is proven on
+  macOS / Apple Silicon — `pixi run spike` (or `./sandbox/spike.sh`) passes 6/6
+  checks: network egress denied, writes scoped, `$HOME` reads denied. See
+  [SPIKE.md](SPIKE.md).
+- **Layers: scaffolded.** `src/` holds the pi-shaped layering as idiomatic Mojo
+  stubs encoding the contracts (TODOs mark flare transport, schema introspection,
+  `posix_spawn`). Not yet compiled — `pixi install` pulls the toolchain.

@@ -1,0 +1,8 @@
+# build artifacts
+/build/
+# pixi env
+/.pixi/
+# scratch / demo runtime dirs
+/demo/scratch/
+# macOS
+.DS_Store
