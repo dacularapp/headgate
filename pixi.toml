@@ -27,6 +27,10 @@ spike = "./sandbox/spike.sh"
 build        = { cmd = "mkdir -p build && mojo build src/sandbox_demo.mojo -o build/sandbox-demo" }
 sandbox-demo = { cmd = "mkdir -p build && mojo build src/sandbox_demo.mojo -o build/sandbox-demo && ./build/sandbox-demo" }
 
+# Offline check of the real CSV SchemaSanitizer (aliasing + type inference +
+# synthetic samples + dealias round-trip). No network/model needed.
+schema-demo  = { cmd = "mkdir -p build && mojo build src/schema_demo.mojo -o build/schema-demo && ./build/schema-demo" }
+
 # Full composition root (src/headgate.mojo) — the whole pi-shaped layer graph now
 # COMPILES + runs (layers above the sandbox are stubs returning empty; the sandbox
 # is real). -I ../flare reserved for when transport is wired (flare not imported
