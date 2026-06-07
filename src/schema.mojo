@@ -85,6 +85,29 @@ def _replace_all(s: String, old: String, new: String) raises -> String:
     return out
 
 
+def fingerprints_from_csv(data_dir: String, min_len: Int = 4) raises -> List[String]:
+    """Collect real-data spans (cell VALUES) to feed the EgressGuard. The header
+    row is skipped on purpose: real column names are aliased away by the sanitizer
+    (that's their protection), and fingerprinting common header words causes false
+    positives — e.g. a header `name` collides with the JSON key "name" in the
+    aliased schema. Values shorter than `min_len` are skipped to avoid over-blocking
+    on ubiquitous short tokens — so this is defense-in-depth, not airtight (the
+    careful-SaaS posture; canaries cover the high-signal case)."""
+    var text = _read_file(_find_csv(data_dir))
+    var lines = text.split("\n")
+    var fps = List[String]()
+    for li in range(1, len(lines)):   # skip header row
+        var line = _strip(String(lines[li]))
+        if line.byte_length() == 0:
+            continue
+        var fields = line.split(",")
+        for fi in range(len(fields)):
+            var v = _strip(String(fields[fi]))
+            if v.byte_length() >= min_len:
+                fps.append(v^)
+    return fps^
+
+
 # ── schema types ─────────────────────────────────────────────────────────────
 
 struct Column(Movable, Copyable):

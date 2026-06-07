@@ -31,6 +31,10 @@ sandbox-demo = { cmd = "mkdir -p build && mojo build src/sandbox_demo.mojo -o bu
 # synthetic samples + dealias round-trip). No network/model needed.
 schema-demo  = { cmd = "mkdir -p build && mojo build src/schema_demo.mojo -o build/schema-demo && ./build/schema-demo" }
 
+# Proves the EgressGuard blocks real-data fingerprints + canary tokens while
+# letting clean payloads through (confidentiality is actually enforced).
+egress-test  = { cmd = "mkdir -p build && mojo build src/egress_test.mojo -o build/egress-test && ./build/egress-test" }
+
 # Full composition root (src/headgate.mojo) — the whole pi-shaped layer graph now
 # COMPILES + runs (layers above the sandbox are stubs returning empty; the sandbox
 # is real). -I ../flare reserved for when transport is wired (flare not imported

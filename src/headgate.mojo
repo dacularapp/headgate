@@ -20,7 +20,7 @@ where the real behavior goes next.
 """
 
 from egress import EgressGuard
-from schema import SchemaSanitizer
+from schema import SchemaSanitizer, fingerprints_from_csv
 from transport import LocalClient, RemoteClient
 from sandbox import Sandbox, SandboxPolicy
 from broker import CapabilityBroker
@@ -28,8 +28,11 @@ from orchestrator import Orchestrator
 
 
 def main() raises:
-    # Confidentiality: fingerprints of real values + canaries seeded in real data.
-    var guard = EgressGuard(List[String](), List[String]())
+    var data_dir = String("./demo/data")
+
+    # Confidentiality: build the guard from the real data — fingerprints of real
+    # values (+ canaries seeded into the data). The guard is now ON, not a no-op.
+    var guard = EgressGuard(fingerprints_from_csv(data_dir), List[String]())
 
     # Two models: local (on-device, sees real data) and remote (frontier, gated).
     var local = LocalClient(String("http://127.0.0.1:8000/v1"))
@@ -40,7 +43,7 @@ def main() raises:
     )
 
     # Containment: network-deny sandbox over the proven Seatbelt profile.
-    var policy = SandboxPolicy(String("./demo/data"), String("./demo/scratch"))
+    var policy = SandboxPolicy(data_dir.copy(), String("./demo/scratch"))
     var sandbox = Sandbox(policy^, String("sandbox/headgate.sb.template"))
 
     # Capability allowlist for the generated code.
@@ -54,6 +57,6 @@ def main() raises:
 
     var answer = orch.run_task(
         String("Count rows grouped by category."),
-        String("./demo/data"),
+        data_dir.copy(),
     )
     print(answer)
