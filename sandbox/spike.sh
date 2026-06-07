@@ -26,9 +26,13 @@ PRIVATE="$(cd "$ROOT/private" && pwd -P)"
 HOME_P="$(cd "$HOME" && pwd -P)"
 
 PROFILE="$ROOT/headgate.sb"
+# @RUNTIME_PREFIX@ is the language runtime (pixi env); irrelevant to this shell
+# spike's stock-tool tests, so point it at a harmless existing path.
+RUNTIME_P="${CONDA_PREFIX:-/usr/lib}"
 sed -e "s#@DATA_DIR@#$DATA#g" \
     -e "s#@SCRATCH_DIR@#$SCRATCH#g" \
     -e "s#@HOME@#$HOME_P#g" \
+    -e "s#@RUNTIME_PREFIX@#$RUNTIME_P#g" \
     "$TEMPLATE" > "$PROFILE"
 
 run() { sandbox-exec -f "$PROFILE" "$@"; }

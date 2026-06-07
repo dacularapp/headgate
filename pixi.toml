@@ -35,6 +35,11 @@ schema-demo  = { cmd = "mkdir -p build && mojo build src/schema_demo.mojo -o bui
 # letting clean payloads through (confidentiality is actually enforced).
 egress-test  = { cmd = "mkdir -p build && mojo build src/egress_test.mojo -o build/egress-test && ./build/egress-test" }
 
+# Compile generated Mojo -> run it in the sandbox. Proves the codegen->run
+# pipeline end to end: benign code computes over real data; malicious code
+# (reads $HOME) is contained.
+pipeline-demo = { cmd = "mkdir -p build && mojo build src/pipeline_demo.mojo -o build/pipeline-demo && ./build/pipeline-demo" }
+
 # Full composition root (src/headgate.mojo) — the whole pi-shaped layer graph now
 # COMPILES + runs (layers above the sandbox are stubs returning empty; the sandbox
 # is real). -I ../flare reserved for when transport is wired (flare not imported

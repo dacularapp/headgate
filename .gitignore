@@ -4,5 +4,7 @@
 /.pixi/
 # scratch / demo runtime dirs (created by demos at runtime)
 /demo/
+# captured command output (local only)
+/.scratch/
 # macOS
 .DS_Store

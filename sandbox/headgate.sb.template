@@ -46,5 +46,10 @@
 ;; ── DEFENSE-IN-DEPTH: read-scoping ────────────────────────────────────────
 ;; Deny the user's home (credentials, keys, browser data, other projects) ...
 (deny file-read* (subpath "@HOME@"))
+;; ... but re-allow the language runtime/toolchain (the pixi env lives UNDER
+;; $HOME), so a compiled Mojo binary can load its dylibs
+;; (e.g. libKGENCompilerRTShared.dylib). This is the runtime, not user data.
+;; Comes after the $HOME deny so it wins for this subpath (last match wins).
+(allow file-read* file-map-executable (subpath "@RUNTIME_PREFIX@"))
 ;; ... and allow only the scoped private-data dir, read-only.
 (allow file-read* (subpath "@DATA_DIR@"))

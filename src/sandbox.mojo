@@ -110,9 +110,13 @@ struct Sandbox(Movable):
         var tmpl = _read(self.template_path)
         var data_c = _canonical(self.policy.data_dir)
         var home_c = _canonical(getenv("HOME", "/"))
+        # The Mojo runtime/toolchain (pixi env) lives under $HOME; allow reading it
+        # so compiled binaries can load their dylibs. CONDA_PREFIX points at the env.
+        var runtime = getenv("CONDA_PREFIX", "/nonexistent-runtime")
         var rendered = _replace_all(tmpl, String("@DATA_DIR@"), data_c)
         rendered = _replace_all(rendered, String("@SCRATCH_DIR@"), scratch_c)
         rendered = _replace_all(rendered, String("@HOME@"), home_c)
+        rendered = _replace_all(rendered, String("@RUNTIME_PREFIX@"), runtime)
         var path = scratch_c + "/headgate.sb"
         _write(path, rendered)
         return path
@@ -139,3 +143,32 @@ struct Sandbox(Movable):
         except:
             out = String("")
         return RunResult(code, out^)
+
+    def compile_and_run(self, source: String, args: List[String]) raises -> RunResult:
+        """Write generated Mojo `source` to scratch, compile it, then run the
+        binary under the sandbox via `run()`. Returns the compile error as the
+        RunResult on a build failure.
+
+        v1 compiles OUTSIDE the sandbox. CAVEAT: Mojo `comptime` executes at BUILD
+        time, so a hostile program could act during compilation, outside
+        containment. Acceptable under the careful-SaaS threat model (model code is
+        not adversarial); the adversarial tier must sandbox the compile too
+        (network-denied) — TODO. The *run* step is fully contained either way."""
+        var scratch_c = _canonical(self.policy.scratch_dir)
+        var src_path = scratch_c + "/gen.mojo"
+        var bin_path = scratch_c + "/gen"
+        var build_out = scratch_c + "/build.out"
+        _write(src_path, source)
+
+        var build_cmd = String("mojo build '") + src_path + "' -o '" + bin_path
+        build_cmd += String("' > '") + build_out + "' 2>&1"
+        var brc = _shell(build_cmd)
+        if brc != 0:
+            var berr: String
+            try:
+                berr = _read(build_out)
+            except:
+                berr = String("")
+            return RunResult(brc, String("compile failed:\n") + berr^)
+
+        return self.run(bin_path, args)
