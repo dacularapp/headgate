@@ -78,6 +78,33 @@ def _mock_program() -> String:
     return s
 
 
+def _codegen_system() -> String:
+    """System prompt for the remote model. The model's training predates current
+    Mojo, so it emits removed syntax (`let`, `fn`, `alias`, `from pathlib import`).
+    Teach the current dialect + give a known-good example to pattern-match. (Static,
+    no private data — safe to send.) The durable fix is the compile-feedback loop;
+    this is the first line."""
+    var s = String(
+        "You generate ONE self-contained Mojo program. Output ONLY Mojo code —"
+        " no prose, no markdown fences.\n\n"
+    )
+    s += "Mojo has CHANGED since your training data. Follow these rules EXACTLY:\n"
+    s += "- Use `def`, never `fn` (removed). `def` does NOT imply raising; write `def main() raises:`.\n"
+    s += "- Use `var`, never `let` (removed).\n"
+    s += "- Use `comptime`, never `alias` (removed).\n"
+    s += "- Stdlib imports need the `std.` prefix (e.g. `from std.os import ...`). Avoid pathlib — read files with `open()`.\n"
+    s += "- No String slicing (`s[a:b]` is invalid). Use `s.split(sep)` and wrap parts with `String(...)`.\n"
+    s += "- `len(x)` for lists; `s.byte_length()` for a String's length; `String(s.strip())` to trim.\n\n"
+    s += (
+        "TASK: read the CSV at the literal path __DATA_CSV__ (first row is a"
+        " header), compute the requested result, and `print` it. Refer to columns"
+        " by their aliases (col_0, col_1, ...).\n\n"
+    )
+    s += "COMPLETE VALID EXAMPLE — match this exact style and API:\n"
+    s += _mock_program()
+    return s
+
+
 struct ChatMessage(Movable, Copyable):
     var role: String     # "system" | "user" | "assistant"
     var content: String
@@ -143,12 +170,7 @@ struct RemoteClient(Movable):
         return self._anthropic(prompt, key)
 
     def _anthropic(self, prompt: String, key: String) raises -> String:
-        var sys = String(
-            "You write a single self-contained Mojo program with"
-            " `def main() raises:` that reads the CSV at __DATA_CSV__, computes the"
-            " result, and prints it. Refer to columns by their aliases. Output only"
-            " Mojo code."
-        )
+        var sys = _codegen_system()
         var model = getenv("HEADGATE_MODEL", "claude-sonnet-4-6")
         var body = String('{"model":"') + model + '","max_tokens":2048,'
         body += '"system":"' + _json_escape(sys) + '",'
