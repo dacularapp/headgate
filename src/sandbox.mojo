@@ -144,6 +144,15 @@ struct Sandbox(Movable):
             out = String("")
         return RunResult(code, out^)
 
+    def write_scratch(self, name: String, content: String) raises -> String:
+        """Write `content` to `name` in the scratch dir; return its canonical path.
+        Stages synthetic data for the runtime-feedback loop (scratch is readable in
+        the sandbox profile)."""
+        var scratch_c = _canonical(self.policy.scratch_dir)
+        var path = scratch_c + "/" + name
+        _write(path, content)
+        return path
+
     def compile(self, source: String) raises -> RunResult:
         """Compile generated Mojo `source` to a binary in scratch (NO run).
         Returns RunResult(0, "") on success, or (rc, raw compiler errors) on

@@ -60,17 +60,21 @@ struct Orchestrator(Movable):
                    + String("\nsamples=") + schema.synthetic_samples(3)))
         var code = self.remote.codegen(msgs)
 
-        # 3. Compile-feedback loop on ALIASED code: validate it compiles, and on
-        #    failure send the compiler errors back to the model to fix. This runs
-        #    on aliased code (col_0…, __DATA_CSV__ placeholder), so the errors we
-        #    send upstream carry NO real names or data. (`compile` doesn't open the
-        #    file, so the placeholder path is fine for a syntax/type check.)
+        # 3. Feedback loop on SYNTHETIC data: compile AND run the aliased code
+        #    against a synthetic CSV (aliased headers col_0…, fake values), and on
+        #    any failure send the error back to the model to fix. This catches BOTH
+        #    compile and RUNTIME errors, and everything sent upstream carries only
+        #    aliases + synthetic values — never real data. (The code reads the CSV at
+        #    __DATA_CSV__; we inject the synthetic path here, the real one in step 4.)
+        var syn_csv = self.sandbox.write_scratch(
+            String("synthetic.csv"), schema.synthetic_csv(8))
         var attempt = 0
         while attempt < self.max_fix_attempts:
-            var c = self.sandbox.compile(code)
-            if c.exit_code == 0:
+            var r = self.sandbox.compile_and_run(
+                inject_data_path(code, syn_csv), List[String]())
+            if r.exit_code == 0:
                 break
-            code = self.remote.fix_code(code, c.output)   # guarded; aliased in/out
+            code = self.remote.fix_code(code, r.output)   # guarded; aliased in/out
             attempt += 1
 
         # 4. Validated -> map aliases back to real names + inject the real CSV path

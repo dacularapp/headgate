@@ -173,6 +173,31 @@ struct SanitizedSchema(Movable):
         out += "]"
         return out
 
+    def synthetic_csv(self, n: Int) -> String:
+        """`n` fake rows as CSV with ALIASED headers (col_0,col_1,…) and
+        type-appropriate fake values. Used by the runtime-feedback loop: the
+        generated code (which reads a CSV at __DATA_CSV__) runs against this so any
+        runtime errors carry only aliases + fakes — never real data."""
+        var out = String("")
+        for c in range(len(self.columns)):   # header = aliases
+            if c > 0:
+                out += ","
+            out += self.columns[c].alias_name
+        out += "\n"
+        for r in range(n):
+            for c in range(len(self.columns)):
+                if c > 0:
+                    out += ","
+                var dt = self.columns[c].dtype
+                if dt == "int":
+                    out += String(r * 7 + 1)
+                elif dt == "float":
+                    out += String(r) + ".5"
+                else:
+                    out += "s" + String(r)
+            out += "\n"
+        return out
+
     def dealias_code(self, code: String) raises -> String:
         """Map aliases in generated code back to real names before the sandbox
         runs it locally. The reverse map stays here, never sent.
