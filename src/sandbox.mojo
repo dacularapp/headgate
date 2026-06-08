@@ -72,6 +72,30 @@ def _replace_all(s: String, old: String, new: String) raises -> String:
     return out
 
 
+def _strip_compiler_noise(s: String) raises -> String:
+    """Drop Mojo's crashpad-init warnings — the compiler's crash reporter can't
+    grab a mach port under the compile sandbox, so it prints a few lines and
+    continues. Keeps the real compiler errors clean for the feedback loop."""
+    var lines = s.split("\n")
+    var out = String("")
+    var first = True
+    for i in range(len(lines)):
+        var ln = String(lines[i])
+        if (
+            ln.find("crashpad") != -1
+            or ln.find("Crashpad") != -1
+            or ln.find("child_port_handshake") != -1
+            or ln.find("ReadExactly") != -1
+            or ln.find("Crash reporting") != -1
+        ):
+            continue
+        if not first:
+            out += "\n"
+        out += ln
+        first = False
+    return out
+
+
 # ── policy + result ──────────────────────────────────────────────────────────
 
 struct SandboxPolicy(Movable):
@@ -153,15 +177,34 @@ struct Sandbox(Movable):
         _write(path, content)
         return path
 
+    def _render_compile_profile(self, scratch_c: String, prefix: String) raises -> String:
+        """Render compile.sb.template (sibling of the run template) with canonical
+        paths; write to scratch; return its path."""
+        var tmpl_path = _replace_all(
+            self.template_path, String("headgate.sb.template"), String("compile.sb.template"))
+        var tmpl = _read(tmpl_path)
+        var home_c = _canonical(getenv("HOME", "/"))
+        var tmp_c = _canonical(getenv("TMPDIR", "/tmp"))
+        var runtime = prefix if prefix != "" else String("/nonexistent-runtime")
+        var r = _replace_all(tmpl, String("@SCRATCH_DIR@"), scratch_c)
+        r = _replace_all(r, String("@HOME@"), home_c)
+        r = _replace_all(r, String("@TMPDIR@"), tmp_c)
+        r = _replace_all(r, String("@RUNTIME_PREFIX@"), runtime)
+        var path = scratch_c + "/compile.sb"
+        _write(path, r)
+        return path
+
     def compile(self, source: String) raises -> RunResult:
         """Compile generated Mojo `source` to a binary in scratch (NO run).
-        Returns RunResult(0, "") on success, or (rc, raw compiler errors) on
-        failure. Used to VALIDATE code before dealiasing — so compiler errors fed
-        back to the remote model carry only aliased names (col_0…), never real data.
+        Returns RunResult(0, "") on success, or (rc, compiler errors) on failure.
+        Used to VALIDATE code before dealiasing — so compiler errors fed back to the
+        remote model carry only aliased names (col_0…), never real data.
 
-        Compiles OUTSIDE the sandbox. CAVEAT: Mojo `comptime` runs at BUILD time,
-        outside containment — acceptable under careful-SaaS; the adversarial tier
-        must sandbox the compile too (TODO). The *run* step IS contained."""
+        The compile runs UNDER a network-denied sandbox (sandbox/compile.sb.template):
+        Mojo `comptime` executes at build time, so this contains it — no network
+        (can't phone home), writes scoped to scratch/toolchain/temp. Reads stay
+        broad (the compiler needs its toolchain). The *run* step is separately
+        contained + read-scoped (headgate.sb.template)."""
         var scratch_c = _canonical(self.policy.scratch_dir)
         var src_path = scratch_c + "/gen.mojo"
         var bin_path = scratch_c + "/gen"
@@ -172,7 +215,10 @@ struct Sandbox(Movable):
         # activation (e.g. ./build/headgate), so don't rely on `mojo` being on PATH.
         var prefix = getenv("CONDA_PREFIX", "")
         var mojo_bin = (prefix + "/bin/mojo") if prefix != "" else String("mojo")
-        var build_cmd = String("'") + mojo_bin + "' build '" + src_path + "' -o '" + bin_path
+        var profile = self._render_compile_profile(scratch_c, prefix)
+
+        var build_cmd = String("sandbox-exec -f '") + profile + "' '" + mojo_bin
+        build_cmd += String("' build '") + src_path + "' -o '" + bin_path
         build_cmd += String("' > '") + build_out + "' 2>&1"
         var brc = _shell(build_cmd)
         if brc != 0:
@@ -181,7 +227,7 @@ struct Sandbox(Movable):
                 berr = _read(build_out)
             except:
                 berr = String("")
-            return RunResult(brc, berr^)
+            return RunResult(brc, _strip_compiler_noise(berr^))
         return RunResult(0, String(""))
 
     def compile_and_run(self, source: String, args: List[String]) raises -> RunResult:

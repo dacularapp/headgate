@@ -1,0 +1,35 @@
+;; headgate COMPILE confinement — macOS Seatbelt (sandbox-exec) profile.
+;;
+;; The generated program is *compiled* here, and Mojo `comptime` executes at
+;; BUILD time — OUTSIDE the run sandbox. This profile contains that: the primary
+;; control is NO NETWORK (a hostile `comptime` cannot phone home during the
+;; build), plus writes scoped to the toolchain caches + scratch + temp (no
+;; tampering with the user's files). Reads stay broad — the Mojo compiler needs
+;; to read its toolchain, stdlib, and caches, so read-scoping is deferred (the
+;; run profile, headgate.sb.template, IS read-scoped).
+;;
+;; Placeholders are substituted with canonical paths by src/sandbox.mojo:
+;;   @SCRATCH_DIR@   the build's source + output binary live here
+;;   @RUNTIME_PREFIX@ the pixi env (CONDA_PREFIX) — Mojo toolchain + caches
+;;   @HOME@          the invoking user's home — writes denied (except caches)
+;;   @TMPDIR@        the compiler's temp dir
+
+(version 1)
+(import "/System/Library/Sandbox/Profiles/bsd.sb")
+(allow process-fork)
+(allow process-exec*)
+
+;; The compiler needs broad reads (toolchain, stdlib, dyld cache).
+(allow file-read* file-map-executable)
+
+;; ── PRIMARY CONTAINMENT: no network at build time ────────────────────────────
+;; Mojo comptime runs during `mojo build`; this stops it exfiltrating.
+(deny network*)
+
+;; ── writes: deny the user's home, re-allow only what the compiler needs ──────
+(deny file-write* (subpath "@HOME@"))
+(allow file-write* (subpath "@SCRATCH_DIR@"))
+(allow file-write* (subpath "@RUNTIME_PREFIX@"))
+(allow file-write* (subpath "@TMPDIR@"))
+(allow file-write* (subpath "@HOME@/.modular"))
+(allow file-write* (subpath "@HOME@/.cache"))
