@@ -26,6 +26,7 @@ struct Orchestrator(Movable):
     var sanitizer: SchemaSanitizer
     var sandbox: Sandbox
     var broker: CapabilityBroker
+    var max_fix_attempts: Int   # compile-feedback retries before giving up
 
     def __init__(
         out self,
@@ -40,6 +41,7 @@ struct Orchestrator(Movable):
         self.sanitizer = sanitizer^
         self.sandbox = sandbox^
         self.broker = broker^
+        self.max_fix_attempts = 3
 
     def run_task(self, intent: String, data_dir: String) raises -> String:
         """Execute one privacy-preserving task end to end (single pass)."""
@@ -57,10 +59,21 @@ struct Orchestrator(Movable):
                    + String("\nsamples=") + schema.synthetic_samples(3)))
         var code = self.remote.codegen(msgs)
 
-        # 3. Map aliases back to real names, inject the real CSV path — LOCALLY.
-        var deal = schema.dealias_code(code)
-        var prog = inject_data_path(deal, csv_path_for(data_dir))
+        # 3. Compile-feedback loop on ALIASED code: validate it compiles, and on
+        #    failure send the compiler errors back to the model to fix. This runs
+        #    on aliased code (col_0…, __DATA_CSV__ placeholder), so the errors we
+        #    send upstream carry NO real names or data. (`compile` doesn't open the
+        #    file, so the placeholder path is fine for a syntax/type check.)
+        var attempt = 0
+        while attempt < self.max_fix_attempts:
+            var c = self.sandbox.compile(code)
+            if c.exit_code == 0:
+                break
+            code = self.remote.fix_code(code, c.output)   # guarded; aliased in/out
+            attempt += 1
 
-        # 4. Compile + run in the sandbox over REAL data; result stays local.
+        # 4. Validated -> map aliases back to real names + inject the real CSV path
+        #    LOCALLY, then compile + run over REAL data in the sandbox. Output local.
+        var prog = inject_data_path(schema.dealias_code(code), csv_path_for(data_dir))
         var result = self.sandbox.compile_and_run(prog, List[String]())
         return result.output.copy()

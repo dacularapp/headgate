@@ -144,16 +144,15 @@ struct Sandbox(Movable):
             out = String("")
         return RunResult(code, out^)
 
-    def compile_and_run(self, source: String, args: List[String]) raises -> RunResult:
-        """Write generated Mojo `source` to scratch, compile it, then run the
-        binary under the sandbox via `run()`. Returns the compile error as the
-        RunResult on a build failure.
+    def compile(self, source: String) raises -> RunResult:
+        """Compile generated Mojo `source` to a binary in scratch (NO run).
+        Returns RunResult(0, "") on success, or (rc, raw compiler errors) on
+        failure. Used to VALIDATE code before dealiasing — so compiler errors fed
+        back to the remote model carry only aliased names (col_0…), never real data.
 
-        v1 compiles OUTSIDE the sandbox. CAVEAT: Mojo `comptime` executes at BUILD
-        time, so a hostile program could act during compilation, outside
-        containment. Acceptable under the careful-SaaS threat model (model code is
-        not adversarial); the adversarial tier must sandbox the compile too
-        (network-denied) — TODO. The *run* step is fully contained either way."""
+        Compiles OUTSIDE the sandbox. CAVEAT: Mojo `comptime` runs at BUILD time,
+        outside containment — acceptable under careful-SaaS; the adversarial tier
+        must sandbox the compile too (TODO). The *run* step IS contained."""
         var scratch_c = _canonical(self.policy.scratch_dir)
         var src_path = scratch_c + "/gen.mojo"
         var bin_path = scratch_c + "/gen"
@@ -173,6 +172,14 @@ struct Sandbox(Movable):
                 berr = _read(build_out)
             except:
                 berr = String("")
-            return RunResult(brc, String("compile failed:\n") + berr^)
+            return RunResult(brc, berr^)
+        return RunResult(0, String(""))
 
-        return self.run(bin_path, args)
+    def compile_and_run(self, source: String, args: List[String]) raises -> RunResult:
+        """Compile `source`, then run the binary under the sandbox. The run step is
+        fully contained (the compile is not — see `compile`)."""
+        var c = self.compile(source)
+        if c.exit_code != 0:
+            return RunResult(c.exit_code, String("compile failed:\n") + c.output)
+        var scratch_c = _canonical(self.policy.scratch_dir)
+        return self.run(scratch_c + "/gen", List[String]())

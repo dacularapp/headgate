@@ -169,6 +169,22 @@ struct RemoteClient(Movable):
             return _mock_program()
         return self._anthropic(prompt, key)
 
+    def fix_code(self, code: String, errors: String) raises -> String:
+        """Ask the remote model to fix code that failed to compile. Operates ONLY
+        on ALIASED code + aliased compiler errors (no real data/names) — still
+        routed through the EgressGuard (fails closed). Offline (mock / no key):
+        returns the code unchanged."""
+        var prompt = String(
+            "The Mojo program below FAILED to compile. Fix it and output ONLY the"
+            " corrected, complete Mojo program.\n\nCOMPILER ERRORS:\n"
+        )
+        prompt += errors + "\n\nPROGRAM:\n" + code
+        var checked = self.guard.check(prompt)   # raises -> aborts the send
+        var key = getenv("ANTHROPIC_API_KEY", "")
+        if getenv("HEADGATE_MOCK", "") != "" or key == "":
+            return code
+        return self._anthropic(checked, key)
+
     def _anthropic(self, prompt: String, key: String) raises -> String:
         var sys = _codegen_system()
         var model = getenv("HEADGATE_MODEL", "claude-sonnet-4-6")
