@@ -129,16 +129,22 @@ Early, but past "just a doc":
   `pixi run sandbox-demo` (or `pixi run build`) builds `build/sandbox-demo`, which
   re-verifies containment from Mojo: in-scope read works, out-of-scope read and
   network egress are denied.
-- **Whole graph compiles + runs.** All `src/` layers (egress, schema, transport,
-  broker, orchestrator, headgate) are converted to current Mojo syntax and
-  `pixi run build-full` builds `build/headgate`, which runs the full flow
-  end-to-end (layers above the sandbox are stubs returning empty; the sandbox is
-  real). The real behavior (flare transport, schema introspection, capability
-  shim) is where the TODOs are.
-- **Toolchain: pinned to `1.0.0b2.dev2026053106`** — the org/flare nightly.
-  flare's upstream deps (`json`, `mozz`) have no tags compatible with a newer
-  nightly, so the whole org is effectively pinned here; headgate matches so
-  `-I ../flare` resolves against the same toolchain.
+- **Real CSV schema sanitizer + egress guard.** `pixi run schema-demo` (type
+  inference + aliasing + dealias) and `pixi run egress-test` (3/3: clean passes,
+  fingerprint + canary blocked — confidentiality enforced, not nominal).
+- **Generated-code pipeline + full thin slice.** `pixi run pipeline-demo` compiles
+  generated Mojo and runs it in the sandbox (benign computes over real data;
+  malicious `$HOME` reader contained). `pixi run e2e-demo` runs the whole flow —
+  sanitize → guarded codegen (mock) → dealias + inject path → compile + run in
+  sandbox → result (`ROW_COUNT= 3`).
+- **Transport over flare (pure Mojo).** `src/transport.mojo` uses flare's
+  `HttpClient` + json (no curl/python). `LocalClient` (OpenAI/plain-HTTP) is
+  runtime-verified — `pixi run local-probe` → `LOCAL HTTP OK`. `RemoteClient`
+  (Anthropic Messages API, HTTPS) compiles; runtime needs `ANTHROPIC_API_KEY`.
+  flare's FFI shims are built into this env by the `flare-ffi` task.
+- **Toolchain: pinned to `1.0.0b2.dev2026060706`** — the org nightly. The
+  flare + json sibling forks are ported to it (json CPU-only; mozz disabled), so
+  `-I ../flare -I ../json` resolve against the same toolchain.
 - **Mojo conventions:** `.agents/skills/mojo-syntax` (copied from `mojo-backend`)
   is the source of truth for current Mojo syntax — follow it over pretrained
   knowledge.

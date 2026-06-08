@@ -15,11 +15,30 @@ platforms = ["osx-arm64"]
 
 [dependencies]
 mojo = "==1.0.0b2.dev2026060706"
+# flare's runtime deps — needed to build flare's FFI shims into this env (the
+# `flare-ffi` task) so flare's HTTP/TLS client works when consumed via -I ../flare.
+openssl          = ">=3.6.1,<4"
+ca-certificates  = ">=2025.1.31"
+zlib             = ">=1.3.1,<2"
+libbrotlicommon  = ">=1,<2"
+libbrotlidec     = ">=1,<2"
+libbrotlienc     = ">=1,<2"
 
 [tasks]
 # The verified containment boundary (SPIKE.md). Pure shell + sandbox-exec — needs
 # no Mojo toolchain, so this runs even before `pixi install` finishes.
 spike = "./sandbox/spike.sh"
+
+# Build flare's FFI shims (libflare_tls/zlib/brotli/fs) into THIS env's
+# $CONDA_PREFIX/lib so flare's HTTP/TLS client works when consumed via -I ../flare.
+# Sourced (the scripts use `return`); idempotent. Mirrors mojo-backend's flare-tls.
+flare-ffi = "bash -c 'source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh'"
+
+# Compile probe: prove flare's HttpClient is usable from headgate's env.
+flare-probe = { cmd = "mkdir -p build && mojo build src/flare_probe.mojo -I ../flare -I ../json -o build/flare-probe && ./build/flare-probe", depends-on = ["flare-ffi"] }
+
+# Runtime-verify LocalClient's flare HTTP path against a canned OpenAI server.
+local-probe = { cmd = "mkdir -p build && python3 scripts/local_test_server.py & SRV=$!; sleep 1; mojo build src/local_probe.mojo -I ../flare -I ../json -o build/local-probe && ./build/local-probe; R=$?; kill $SRV 2>/dev/null; exit $R", depends-on = ["flare-ffi"] }
 
 # FIRST VERTICAL SLICE — compiles + runs today. Renders the Seatbelt profile and
 # execs under sandbox-exec from Mojo (src/sandbox.mojo), then verifies containment
@@ -43,10 +62,8 @@ pipeline-demo = { cmd = "mkdir -p build && mojo build src/pipeline_demo.mojo -o 
 # FULL THIN SLICE end to end (mock model): sanitize CSV -> guarded codegen (mock)
 # -> dealias + inject path -> compile + run in sandbox -> print the result. Run
 # under pixi so CONDA_PREFIX/PATH are set for the in-process compile step.
-e2e-demo = { cmd = "mkdir -p demo/data demo/scratch build && printf 'name,age\\nalice,30\\nbob,25\\ncarol,41\\n' > demo/data/records.csv && mojo build src/headgate.mojo -o build/headgate && HEADGATE_MOCK=1 ./build/headgate; rm -rf demo" }
+e2e-demo = { cmd = "mkdir -p demo/data demo/scratch build && printf 'name,age\\nalice,30\\nbob,25\\ncarol,41\\n' > demo/data/records.csv && mojo build src/headgate.mojo -I ../flare -I ../json -I ../minja2/src -o build/headgate && HEADGATE_MOCK=1 ./build/headgate; rm -rf demo", depends-on = ["flare-ffi"] }
 
-# Full composition root (src/headgate.mojo) — the whole pi-shaped layer graph now
-# COMPILES + runs (layers above the sandbox are stubs returning empty; the sandbox
-# is real). -I ../flare reserved for when transport is wired (flare not imported
-# yet); -I ../minja2/src: JSON + prompt templating.
-build-full = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../minja2/src -o build/headgate" }
+# Full composition root (src/headgate.mojo). transport.mojo now imports flare's
+# HttpClient + json, so this needs -I ../flare -I ../json and the flare FFI shims.
+build-full = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../json -I ../minja2/src -o build/headgate", depends-on = ["flare-ffi"] }

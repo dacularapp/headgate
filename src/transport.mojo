@@ -1,45 +1,68 @@
-"""Transport — HTTP to the two models, with the EgressGuard wired into the remote path.
+"""Transport — HTTP to the two models over flare, with the EgressGuard on the remote path.
 
-This is headgate's `pi-ai`-equivalent layer (PRIOR-ART.md): the one place network
-I/O happens, so the one place egress policy is enforced.
+headgate's `pi-ai`-equivalent layer (PRIOR-ART.md): the one place network I/O
+happens, so the one place egress policy is enforced. Now pure Mojo over flare's
+HttpClient (no curl/python), parsing responses with flare's `Response.json()`.
 
 Two clients, deliberately asymmetric:
-  - LocalClient  -> the on-device model via `inference-server` (mojo-backend).
-                    Sees the REAL private data. No egress guard: it never leaves
-                    the machine (127.0.0.1).
-  - RemoteClient -> the frontier model. EVERY message is run through the
-                    EgressGuard before it touches the socket. trusted-local vs
-                    untrusted-remote.
+  - LocalClient  -> the on-device model via `inference-server` (mojo-backend),
+                    OpenAI /chat/completions over plain HTTP (127.0.0.1). No egress
+                    guard: it never leaves the machine.
+  - RemoteClient -> the frontier model (Anthropic Messages API, HTTPS). EVERY
+                    message clears the EgressGuard before it touches the socket.
 
-RemoteClient.codegen has two paths:
-  - MOCK (default; when ANTHROPIC_API_KEY is unset or HEADGATE_MOCK is set):
-    returns a canned generated program so the whole pipeline runs offline.
-  - REAL: shells to scripts/anthropic_codegen.py (curl-free; stdlib urllib) for
-    the Anthropic Messages API call. INTERIM — TODO: flare HTTP + minja2 JSON in
-    pure Mojo once the dependency story is settled.
+MOCK path: when ANTHROPIC_API_KEY is unset or HEADGATE_MOCK is set, codegen returns
+a canned program so the pipeline runs offline.
 """
 
 from std.os import getenv
-from std.ffi import external_call, c_int
+from flare.http import HttpClient, Request
 from egress import EgressGuard
 
 
-def _shell(var cmd: String) -> Int:
-    return Int(external_call["system", c_int](cmd.as_c_string_slice()))
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _replace_all(s: String, old: String, new: String) raises -> String:
+    var parts = s.split(old)
+    var out = String("")
+    for i in range(len(parts)):
+        if i > 0:
+            out += new
+        out += String(parts[i])
+    return out
 
 
-def _read(path: String) raises -> String:
-    with open(path, "r") as f:
-        return f.read()
+def _json_escape(s: String) raises -> String:
+    var o = _replace_all(s, String("\\"), String("\\\\"))
+    o = _replace_all(o, String('"'), String('\\"'))
+    o = _replace_all(o, String("\n"), String("\\n"))
+    o = _replace_all(o, String("\r"), String("\\r"))
+    o = _replace_all(o, String("\t"), String("\\t"))
+    return o
 
 
-def _write(path: String, s: String) raises:
-    with open(path, "w") as f:
-        f.write(s)
+def _strip_fences(var s: String) raises -> String:
+    """If the model wrapped code in a ```...``` block, return the inside (minus
+    the optional leading language tag). String has no slicing, so split + rejoin."""
+    if s.find("```") == -1:
+        return s^
+    var parts = s.split("```")
+    if len(parts) < 2:
+        return s^
+    var block = String(parts[1])
+    if block.find("\n") == -1:
+        return block^
+    var lines = block.split("\n")
+    var out = String("")
+    for i in range(1, len(lines)):   # drop the language-tag line
+        if i > 1:
+            out += "\n"
+        out += String(lines[i])
+    return out^
 
 
 def _mock_program() -> String:
-    """A canned 'generated' program: count non-empty data rows in the CSV at the
+    """Canned 'generated' program: count non-empty data rows in the CSV at the
     `__DATA_CSV__` placeholder (the orchestrator injects the real path)."""
     var s = String("def main() raises:\n")
     s += "    var text: String\n"
@@ -65,22 +88,39 @@ struct ChatMessage(Movable, Copyable):
 
 
 struct LocalClient(Movable):
-    """Local model via inference-server. baseURL is the OpenAI seam (README.md)."""
-    var base_url: String
+    """Local model via inference-server, OpenAI /chat/completions over plain HTTP."""
+    var base_url: String   # e.g. http://127.0.0.1:8000/v1
 
     def __init__(out self, var base_url: String):
         self.base_url = base_url^
 
     def chat(self, messages: List[ChatMessage]) raises -> String:
-        """POST /chat/completions to the local server. No egress guard — local
-        only. TODO: flare HttpClient call + parse."""
-        return String("")  # TODO
+        """POST the messages and return the assistant content. Local only — no
+        egress guard. Requires inference-server running."""
+        var model = getenv("HEADGATE_LOCAL_MODEL", "local")
+        var body = String('{"model":"') + model + '","messages":['
+        for i in range(len(messages)):
+            if i > 0:
+                body += ","
+            body += '{"role":"' + messages[i].role
+            body += '","content":"' + _json_escape(messages[i].content) + '"}'
+        body += "]}"
+
+        var req = Request(
+            method="POST",
+            url=self.base_url + "/chat/completions",
+            body=List[UInt8](body.as_bytes()),
+        )
+        req.headers.set("content-type", "application/json")
+        var client = HttpClient()
+        var resp = client.send(req)
+        return resp.json()["choices"][0]["message"]["content"].string_value()
 
 
 struct RemoteClient(Movable):
-    """Frontier model. The guard gates the outbound path — enforced here, not left
-    to callers, so it cannot be bypassed."""
-    var base_url: String
+    """Frontier model (Anthropic Messages API, HTTPS). The guard gates the outbound
+    path — enforced here, not left to callers, so it cannot be bypassed."""
+    var base_url: String   # e.g. https://api.anthropic.com/v1
     var api_key: String
     var guard: EgressGuard
 
@@ -90,9 +130,8 @@ struct RemoteClient(Movable):
         self.guard = guard^
 
     def codegen(self, messages: List[ChatMessage]) raises -> String:
-        """Ask the remote model to write code. Each message's content must clear
-        the EgressGuard first (fails closed: if the guard raises, nothing is sent).
-        Returns generated code."""
+        """Each message must clear the EgressGuard first (fails closed). Returns
+        generated code (fences stripped). MOCK unless a real key is present."""
         var prompt = String("")
         for m in messages:
             var checked = self.guard.check(m.content)   # raises -> aborts send
@@ -101,21 +140,28 @@ struct RemoteClient(Movable):
         var key = getenv("ANTHROPIC_API_KEY", "")
         if getenv("HEADGATE_MOCK", "") != "" or key == "":
             return _mock_program()
-        return self._anthropic(prompt)
+        return self._anthropic(prompt, key)
 
-    def _anthropic(self, prompt: String) raises -> String:
-        """INTERIM real path: write the (guard-cleared) prompt to a temp file and
-        run the python helper, which does the Messages API call + JSON parse +
-        fence-strip and prints the generated code. Untested in this env (no key).
-        TODO: replace with flare HTTP + minja2 JSON in pure Mojo."""
-        var tmp = getenv("TMPDIR", "/tmp/")
-        var prompt_file = tmp + "hg_prompt.txt"
-        var resp_file = tmp + "hg_resp.txt"
-        _write(prompt_file, prompt)
-        var cmd = String("python3 scripts/anthropic_codegen.py '") + prompt_file
-        cmd += String("' > '") + resp_file + "' 2>/dev/null"
-        _ = _shell(cmd)
-        try:
-            return _read(resp_file)
-        except:
-            return String("")
+    def _anthropic(self, prompt: String, key: String) raises -> String:
+        var sys = String(
+            "You write a single self-contained Mojo program with"
+            " `def main() raises:` that reads the CSV at __DATA_CSV__, computes the"
+            " result, and prints it. Refer to columns by their aliases. Output only"
+            " Mojo code."
+        )
+        var model = getenv("HEADGATE_MODEL", "claude-sonnet-4-6")
+        var body = String('{"model":"') + model + '","max_tokens":2048,'
+        body += '"system":"' + _json_escape(sys) + '",'
+        body += '"messages":[{"role":"user","content":"' + _json_escape(prompt) + '"}]}'
+
+        var req = Request(
+            method="POST",
+            url=self.base_url + "/messages",
+            body=List[UInt8](body.as_bytes()),
+        )
+        req.headers.set("x-api-key", key)
+        req.headers.set("anthropic-version", "2023-06-01")
+        req.headers.set("content-type", "application/json")
+        var client = HttpClient()
+        var resp = client.send(req)
+        return _strip_fences(resp.json()["content"][0]["text"].string_value())
