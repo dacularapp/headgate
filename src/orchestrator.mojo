@@ -14,6 +14,7 @@ feeding scrubbed errors back) and LocalClient summarization of the result. v1
 returns the raw computed result.
 """
 
+from std.os import getenv
 from schema import SchemaSanitizer, csv_path_for, inject_data_path
 from transport import LocalClient, RemoteClient, ChatMessage
 from sandbox import Sandbox
@@ -76,4 +77,19 @@ struct Orchestrator(Movable):
         #    LOCALLY, then compile + run over REAL data in the sandbox. Output local.
         var prog = inject_data_path(schema.dealias_code(code), csv_path_for(data_dir))
         var result = self.sandbox.compile_and_run(prog, List[String]())
-        return result.output.copy()
+
+        # 5. The LOCAL model (the TRUSTED party — it may see real data; talks only
+        #    to 127.0.0.1) summarizes the computed result for the user. This is the
+        #    inverse of the remote path: NO egress guard, because nothing leaves the
+        #    machine. Opt-in via HEADGATE_LOCAL so offline runs (no inference-server)
+        #    still work and just return the raw result.
+        if getenv("HEADGATE_LOCAL", "") == "":
+            return result.output.copy()
+        var summary = List[ChatMessage]()
+        summary.append(ChatMessage(String("system"),
+            String("You are given a task and the raw result computed over the"
+                   " user's private data. Summarize the result in one short"
+                   " sentence for the user.")))
+        summary.append(ChatMessage(String("user"),
+            String("Task: ") + intent + "\nResult: " + result.output))
+        return self.local.chat(summary)

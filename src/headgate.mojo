@@ -19,6 +19,7 @@ stubs — the TODOs (flare transport, schema introspection, capability shim) are
 where the real behavior goes next.
 """
 
+from std.os import getenv
 from egress import EgressGuard
 from schema import SchemaSanitizer, fingerprints_from_csv
 from transport import LocalClient, RemoteClient
@@ -35,7 +36,7 @@ def main() raises:
     var guard = EgressGuard(fingerprints_from_csv(data_dir), List[String]())
 
     # Two models: local (on-device, sees real data) and remote (frontier, gated).
-    var local = LocalClient(String("http://127.0.0.1:8000/v1"))
+    var local = LocalClient(getenv("HEADGATE_LOCAL_URL", "http://127.0.0.1:8000/v1"))
     var remote = RemoteClient(
         String("https://api.anthropic.com/v1"),  # remote frontier model
         String(""),                              # API key from env (TODO)
