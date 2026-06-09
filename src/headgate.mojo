@@ -141,7 +141,11 @@ def main() raises:
         print(orch.run_task(task, data_dir.copy()))
         return
 
-    print("headgate — ask a question about your data. Ctrl-D or 'exit' to quit.")
+    print(
+        "headgate writes code to answer questions ABOUT YOUR DATA — not a chatbot.")
+    print("  e.g. 'how many rows', 'average amount by category'.")
+    print("  Best with ANTHROPIC_API_KEY set (frontier model writes the code);")
+    print("  without it, codegen falls back to the local model. Ctrl-D / 'exit' to quit.")
     while True:
         var r = read_line("\nheadgate> ")
         if r.eof:
@@ -154,7 +158,5 @@ def main() raises:
             break
         try:
             print(orch.run_task(task, data_dir.copy()))
-        except:
-            print(
-                "error running the task — is the inference server running? "
-                "(`millrace server start`, or set HEADGATE_MOCK=1 to try without it)")
+        except e:
+            print("error: " + String(e))
