@@ -75,3 +75,8 @@ budget-route-demo = { cmd = "mkdir -p demo/data demo/scratch build && printf 'na
 # Full composition root (src/headgate.mojo). transport.mojo now imports flare's
 # HttpClient + json, so this needs -I ../flare -I ../json and the flare FFI shims.
 build-full = { cmd = "mkdir -p build && mojo build src/headgate.mojo -I ../flare -I ../json -I ../minja2/src -o build/headgate", depends-on = ["flare-ffi"] }
+
+# headgate over HTTP (src/server.mojo) — the local backend for web/. Same
+# orchestrator as the CLI, served on 127.0.0.1:10000 (POST /chat).
+build-server = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../flare -I ../json -I ../minja2/src -o build/headgate-server", depends-on = ["flare-ffi"] }
+serve-web    = { cmd = "./build/headgate-server", depends-on = ["build-server"] }
