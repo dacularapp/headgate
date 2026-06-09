@@ -7,6 +7,10 @@ key is optional; a missing file or key falls back to env/defaults. Path override
 HEADGATE_CONFIG. Secrets (`anthropic_api_key`) are better supplied via the
 ANTHROPIC_API_KEY env var than written to a plaintext file.
 
+With no API key (and not in mock mode) there's no remote access, so the token
+budget starts at zero — all codegen routes to the local model (local-only mode)
+rather than failing on the first remote call.
+
 Recognized keys (all optional):
   local_url, local_model, remote_base_url, remote_model,
   remote_token_budget (int), anthropic_api_key, mock (bool), use_local_summary (bool)
@@ -108,6 +112,12 @@ def load_config() -> Config:
         mock = True
     if getenv("HEADGATE_LOCAL", "") != "":
         use_local_summary = True
+
+    # 4. no API key -> no remote access: start with a zero budget so all codegen
+    # routes to the local model (graceful local-only mode rather than failing on
+    # the first remote call). Mock mode needs no key, so it's exempt.
+    if api_key == "" and not mock:
+        token_budget = 0
 
     return Config(local_url^, local_model^, remote_base_url^, remote_model^,
                   token_budget, api_key^, mock, use_local_summary)
