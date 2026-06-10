@@ -40,6 +40,7 @@ mkdir -p "$H/build"
 cp -R "$ROOT/src" "$H/src"
 cp -R "$ROOT/sandbox" "$H/sandbox"
 cp -R "$ROOT/scripts" "$H/scripts"
+[[ -d "$ROOT/resources" ]] && cp -R "$ROOT/resources" "$H/resources"   # runtime-loaded system prompt
 cp "$ROOT/pixi.toml" "$H/pixi.toml"
 [[ -f "$ROOT/config.example.json" ]] && cp "$ROOT/config.example.json" "$H/"
 

@@ -15,6 +15,7 @@ MOCK path: when ANTHROPIC_API_KEY is unset or HEADGATE_MOCK is set, codegen retu
 a canned program so the pipeline runs offline.
 """
 
+from std.os import getenv
 from flare.http import HttpClient, Request
 from egress import EgressGuard
 
@@ -77,12 +78,11 @@ def _mock_program() -> String:
     return s
 
 
-def _codegen_system() -> String:
-    """System prompt for the remote model. The model's training predates current
-    Mojo, so it emits removed syntax (`let`, `fn`, `alias`, `from pathlib import`).
-    Teach the current dialect + give a known-good example to pattern-match. (Static,
-    no private data — safe to send.) The durable fix is the compile-feedback loop;
-    this is the first line."""
+def _default_codegen_system() -> String:
+    """Built-in fallback prompt, used only if the resource file can't be read.
+    The model's training predates current Mojo, so it emits removed syntax (`let`,
+    `fn`, `alias`, `from pathlib import`). Teach the current dialect + give a
+    known-good example to pattern-match. (Static, no private data — safe to send.)"""
     var s = String(
         "You generate ONE self-contained Mojo program. Output ONLY Mojo code —"
         " no prose, no markdown fences.\n\n"
@@ -102,6 +102,31 @@ def _codegen_system() -> String:
     s += "COMPLETE VALID EXAMPLE — match this exact style and API:\n"
     s += _mock_program()
     return s
+
+
+def _prompt_path() -> String:
+    """Where to load the system prompt from. `HEADGATE_PROMPT` overrides; otherwise
+    `resources/headgate-system.md` relative to the install dir (cwd), matching how
+    the sandbox templates are resolved (see wiring.mojo)."""
+    var override = getenv("HEADGATE_PROMPT", "")
+    if override != "":
+        return override
+    return String("resources/headgate-system.md")
+
+
+def _codegen_system() -> String:
+    """System prompt for the remote (and fallback local) code generator. Loaded at
+    runtime from `resources/headgate-system.md` so the agent's contract — the
+    confidentiality rules, the vault tool API, the Mojo dialect — can be edited
+    without recompiling. Falls back to the built-in prompt if the file is absent."""
+    try:
+        with open(_prompt_path(), "r") as f:
+            var text = f.read()
+            if String(text.strip()).byte_length() > 0:
+                return text^
+    except:
+        pass  # missing/unreadable -> built-in fallback below
+    return _default_codegen_system()
 
 
 struct ChatMessage(Movable, Copyable):
