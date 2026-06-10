@@ -8,7 +8,7 @@ Runs the SAME orchestrator the CLI does, on localhost:10000, behind one route:
 
 Single-threaded reactor — one task in flight at a time. The orchestrator lives
 in a heap `HeadgateState` reached through a pointer so the borrowed-self handler
-can still run `mut` codegen (mirrors mojo-backend/server.mojo).
+can still run `mut` codegen (mirrors inference-server/server.mojo).
 
     pixi run serve-web        # listens on 127.0.0.1:10000
 """

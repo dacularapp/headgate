@@ -2,7 +2,7 @@
 #
 # Build headgate.zip — the headgate source bundle the Millrace menu app downloads,
 # then `mojo build`s on-device against a separately-fetched Mojo compiler (see
-# millrace/app Bootstrapper). Mirrors mojo-backend/scripts/package_engine.sh.
+# millrace/app Bootstrapper). Mirrors inference-server/scripts/package_engine.sh.
 #
 # The bundle unzips to four siblings:
 #

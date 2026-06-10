@@ -31,7 +31,7 @@ spike = "./sandbox/spike.sh"
 
 # Build flare's FFI shims (libflare_tls/zlib/brotli/fs) into THIS env's
 # $CONDA_PREFIX/lib so flare's HTTP/TLS client works when consumed via -I ../flare.
-# Sourced (the scripts use `return`); idempotent. Mirrors mojo-backend's flare-tls.
+# Sourced (the scripts use `return`); idempotent. Mirrors inference-server's flare-tls.
 flare-ffi = "bash -c 'source ../flare/flare/tls/ffi/build.sh; source ../flare/flare/http/ffi/build.sh'"
 
 # Compile probe: prove flare's HttpClient is usable from headgate's env.

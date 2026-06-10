@@ -5,7 +5,7 @@ happens, so the one place egress policy is enforced. Now pure Mojo over flare's
 HttpClient (no curl/python), parsing responses with flare's `Response.json()`.
 
 Two clients, deliberately asymmetric:
-  - LocalClient  -> the on-device model via `inference-server` (mojo-backend),
+  - LocalClient  -> the on-device model via the `inference-server` engine,
                     OpenAI /chat/completions over plain HTTP (127.0.0.1). No egress
                     guard: it never leaves the machine.
   - RemoteClient -> the frontier model (Anthropic Messages API, HTTPS). EVERY

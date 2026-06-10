@@ -11,7 +11,7 @@ your private data on your side of the gate.
 ## The idea
 
 You have private/local data and a small, capable **local model** (served by
-[`inference-server`](https://github.com/millrace/mojo-backend), the pure-Mojo
+[`inference-server`](https://github.com/millrace/inference-server), the pure-Mojo
 local LLM engine). The local model is good enough to reason over your data, but
 some tasks need a frontier model's code-generation ability.
 
@@ -153,7 +153,7 @@ Early, but past "just a doc":
 - **Toolchain: pinned to `1.0.0b2.dev2026060706`** — the org nightly. The
   flare + json sibling forks are ported to it (json CPU-only; mozz disabled), so
   `-I ../flare -I ../json` resolve against the same toolchain.
-- **Mojo conventions:** `.agents/skills/mojo-syntax` (copied from `mojo-backend`)
+- **Mojo conventions:** `.agents/skills/mojo-syntax` (copied from `inference-server`)
   is the source of truth for current Mojo syntax — follow it over pretrained
   knowledge.
 
