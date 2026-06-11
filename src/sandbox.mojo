@@ -227,12 +227,24 @@ def _strip_compiler_noise(s: String) raises -> String:
 struct SandboxPolicy(Movable):
     var data_dir: String      # read-only mount of the task's private data
     var scratch_dir: String   # the only writable location (results land here)
-    var network: String       # always "deny" for v1 — the primary control
+    var network: String       # "deny" (CSV path) | "loopback" (vault path)
+    var index_dir: String     # the vault's LanceDB index dir (~/.config/dacular);
+                              # read-allowed in the vault run profile so search()
+                              # can read the vector store + chunks.tsv side-table
 
     def __init__(out self, var data_dir: String, var scratch_dir: String):
         self.data_dir = data_dir^
         self.scratch_dir = scratch_dir^
         self.network = String("deny")
+        self.index_dir = String("")
+
+    def __init__(out self, var data_dir: String, var scratch_dir: String,
+                 var index_dir: String, var network: String):
+        """Vault variant: carries the index dir + the network mode ("loopback")."""
+        self.data_dir = data_dir^
+        self.scratch_dir = scratch_dir^
+        self.network = network^
+        self.index_dir = index_dir^
 
 
 struct RunResult(Movable):
@@ -256,8 +268,20 @@ struct Sandbox(Movable):
 
     def _render_profile(self, scratch_c: String) raises -> String:
         """Substitute @DATA_DIR@ / @SCRATCH_DIR@ / @HOME@ with canonical paths,
-        write the rendered profile into scratch, return its path."""
-        var tmpl = _read(self.template_path)
+        write the rendered profile into scratch, return its path. When the policy
+        is in "loopback" mode (the vault path), renders the VAULT template
+        (headgate-vault.sb.template) instead — same containment, plus a localhost-
+        only network allowance + the index dir read-allow."""
+        var is_vault = self.policy.network == "loopback"
+        var tmpl_path = (
+            _replace_all(
+                self.template_path,
+                String("headgate.sb.template"),
+                String("headgate-vault.sb.template"),
+            )
+            if is_vault else self.template_path
+        )
+        var tmpl = _read(tmpl_path)
         var data_c = _canonical(self.policy.data_dir)
         var home_c = _canonical(getenv("HOME", "/"))
         # The Mojo runtime/toolchain (pixi env) lives under $HOME; allow reading it
@@ -267,13 +291,22 @@ struct Sandbox(Movable):
         rendered = _replace_all(rendered, String("@SCRATCH_DIR@"), scratch_c)
         rendered = _replace_all(rendered, String("@HOME@"), home_c)
         rendered = _replace_all(rendered, String("@RUNTIME_PREFIX@"), runtime)
-        var path = scratch_c + "/headgate.sb"
+        if is_vault:
+            # The index dir (~/.config/dacular) lives under $HOME; canonicalize it
+            # so the vault profile can re-allow reads of the vector store + the
+            # chunks.tsv side-table that search() resolves hits through.
+            var index_c = _canonical(
+                self.policy.index_dir if self.policy.index_dir != ""
+                else (getenv("HOME", "/") + "/.config/dacular"))
+            rendered = _replace_all(rendered, String("@INDEX_DIR@"), index_c)
+        var path = scratch_c + ("/headgate-vault.sb" if is_vault else "/headgate.sb")
         _write(path, rendered)
         return path
 
     def run(self, binary: String, args: List[String]) raises -> RunResult:
         """Run `binary args...` under sandbox-exec with the rendered headgate
-        profile: network denied, writes confined to scratch, reads exclude $HOME.
+        profile: network denied (or loopback-only on the vault path), writes
+        confined to scratch, reads exclude $HOME.
 
             sandbox-exec -f <rendered.sb> <binary> <args...>
 
@@ -309,6 +342,28 @@ struct Sandbox(Movable):
         _write(path, content)
         return path
 
+    def scratch_bin(self) raises -> String:
+        """Canonical path of the binary `compile` writes (scratch/gen). The vault
+        path compiles then runs in two steps, so it needs this between them."""
+        return _canonical(self.policy.scratch_dir) + "/gen"
+
+    def capture(self, argv: List[String]) raises -> RunResult:
+        """Run a TRUSTED local helper `argv` (NOT sandboxed) and capture its
+        stdout+stderr. Used by the vault path to invoke `dacular manifest <dir>`,
+        which produces the aliased, frontier-SAFE manifest view. argv[0] must be
+        an absolute path. This is trusted: it computes the alias mapping locally
+        and never sends anything anywhere — the *output* is what becomes
+        frontier-visible, and it is aliases-only by construction (manifest.mojo)."""
+        var scratch_c = _canonical(self.policy.scratch_dir)
+        var outfile = scratch_c + "/capture.out"
+        var code = _spawn_capture(argv, outfile)
+        var out: String
+        try:
+            out = _read(outfile)
+        except:
+            out = String("")
+        return RunResult(code, out^)
+
     def _render_compile_profile(self, scratch_c: String, prefix: String) raises -> String:
         """Render compile.sb.template (sibling of the run template) with canonical
         paths; write to scratch; return its path."""
@@ -326,17 +381,24 @@ struct Sandbox(Movable):
         _write(path, r)
         return path
 
-    def compile(self, source: String) raises -> RunResult:
+    def compile(self, source: String, include_paths: List[String] = List[String]()) raises -> RunResult:
         """Compile generated Mojo `source` to a binary in scratch (NO run).
         Returns RunResult(0, "") on success, or (rc, compiler errors) on failure.
         Used to VALIDATE code before dealiasing — so compiler errors fed back to the
         remote model carry only aliased names (col_0…), never real data.
 
+        `include_paths` are `mojo build`'s `-I` search dirs. For the VAULT path
+        these are the dacular `src` dir + its transitive deps (flare/json/lancedb/
+        pdftotext/zlib) so the generated `from vault import *` + everything it
+        pulls resolves. Empty for the CSV path (no imports beyond stdlib).
+
         The compile runs UNDER a network-denied sandbox (sandbox/compile.sb.template):
         Mojo `comptime` executes at build time, so this contains it — no network
         (can't phone home), writes scoped to scratch/toolchain/temp. Reads stay
-        broad (the compiler needs its toolchain). The *run* step is separately
-        contained + read-scoped (headgate.sb.template)."""
+        broad (`allow file-read* file-map-executable` — the compiler needs its
+        toolchain AND the -I sibling source dirs + the FFI shims under
+        $CONDA_PREFIX/lib, all reachable under that broad read allow). The *run*
+        step is separately contained + read-scoped (headgate{,-vault}.sb.template)."""
         var scratch_c = _canonical(self.policy.scratch_dir)
         var src_path = scratch_c + "/gen.mojo"
         var bin_path = scratch_c + "/gen"
@@ -349,7 +411,7 @@ struct Sandbox(Movable):
         var mojo_bin = (prefix + "/bin/mojo") if prefix != "" else String("mojo")
         var profile = self._render_compile_profile(scratch_c, prefix)
 
-        # sandbox-exec -f <profile> <mojo> build <src> -o <bin>
+        # sandbox-exec -f <profile> <mojo> build <src> -I <p1> -I <p2> … -o <bin>
         # No shell: argv passed verbatim, stdout+stderr captured to build_out.
         var build_argv: List[String] = [
             String("/usr/bin/sandbox-exec"),
@@ -358,9 +420,13 @@ struct Sandbox(Movable):
             mojo_bin,
             String("build"),
             src_path,
-            String("-o"),
-            bin_path,
         ]
+        for i in range(len(include_paths)):
+            build_argv.append(String("-I"))
+            build_argv.append(include_paths[i])
+        build_argv.append(String("-o"))
+        build_argv.append(bin_path)
+
         var brc = _spawn_capture(build_argv, build_out)
         if brc != 0:
             var berr: String
@@ -371,11 +437,18 @@ struct Sandbox(Movable):
             return RunResult(brc, _strip_compiler_noise(berr^))
         return RunResult(0, String(""))
 
-    def compile_and_run(self, source: String, args: List[String]) raises -> RunResult:
-        """Compile `source`, then run the binary under the sandbox. The run step is
-        fully contained (the compile is not — see `compile`)."""
-        var c = self.compile(source)
+    def compile_and_run(
+        self,
+        source: String,
+        args: List[String],
+        include_paths: List[String] = List[String](),
+    ) raises -> RunResult:
+        """Compile `source` (with `-I include_paths`), then run the binary under
+        the sandbox. The run step is fully contained (the compile is not — see
+        `compile`). On the vault path the policy is in "loopback" network mode, so
+        run() picks the vault profile automatically."""
+        var c = self.compile(source, include_paths)
         if c.exit_code != 0:
             return RunResult(c.exit_code, String("compile failed:\n") + c.output)
         var scratch_c = _canonical(self.policy.scratch_dir)
-        return self.run(scratch_c + "/gen", List[String]())
+        return self.run(scratch_c + "/gen", args)

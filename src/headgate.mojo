@@ -13,19 +13,28 @@ Layering (pi-shaped, PRIOR-ART.md):
     sandbox.mojo + broker.mojo   (containment — PROVEN, see SPIKE.md)
 
 Usage:
-    headgate "<task>"     run one task over your data and print the answer
-    headgate              interactive REPL: type a task, get an answer, repeat
+    headgate "<task>"               run one CSV task over your data, print the answer
+    headgate                        interactive REPL: type a task, get an answer
+    headgate vault "<question>" [dir]  answer a question about your private VAULT
+                                    (CSV/PDF/Markdown) — the frontier model writes
+                                    a Mojo program that uses the dacular vault
+                                    tools; it runs locally over the real data and
+                                    only the printed answer surfaces.
 
-Data lives in `data_dir` (config: ~/.config/headgate/config.json, default
+CSV data lives in `data_dir` (config: ~/.config/headgate/config.json, default
 ~/.config/headgate/data). On first run, if that folder has no .csv, headgate
 asks where your data is — or seeds a small demo dataset.
+
+The vault dir defaults to $DACULAR_VAULT, else $HEADGATE_DATA, else ~/dacular.
+Index it first with `dacular index <dir>` (needs the embedding server live).
 """
 
 from std.sys import argv
+from std.os import getenv
 
 from settings import load_config
 from console import read_line
-from wiring import build_orchestrator, has_csv, seed_demo
+from wiring import build_orchestrator, build_vault_orchestrator, has_csv, seed_demo
 
 
 def _resolve_data_dir(var data_dir: String) raises -> String:
@@ -49,7 +58,42 @@ def _resolve_data_dir(var data_dir: String) raises -> String:
     return data_dir^
 
 
+def _vault_dir(var arg: String) raises -> String:
+    """Resolve the vault dir for the `vault` subcommand: an explicit CLI arg wins,
+    then $DACULAR_VAULT, then $HEADGATE_DATA, then ~/dacular (dacular's own
+    default). Kept consistent with dacular/src/vault.mojo `_vault_dir()`."""
+    if arg != "":
+        return arg^
+    var d = getenv("DACULAR_VAULT", "")
+    if d != "":
+        return d
+    d = getenv("HEADGATE_DATA", "")
+    if d != "":
+        return d
+    return getenv("HOME", ".") + "/dacular"
+
+
+def _run_vault(cfg_question: String, var vault_dir: String) raises:
+    """`headgate vault "<question>" [dir]` — the vault codegen loop."""
+    var cfg = load_config()
+    var dir = _vault_dir(vault_dir^)
+    var orch = build_vault_orchestrator(cfg, dir)
+    print(orch.run_vault_task(cfg_question, dir.copy()))
+
+
 def main() raises:
+    # `headgate vault "<question>" [dir]` — the private-vault codegen loop. Handled
+    # first so it bypasses the CSV data-dir resolution (it has its own dir).
+    var argv0 = argv()
+    if len(argv0) > 1 and String(argv0[1]) == "vault":
+        if len(argv0) < 3:
+            print('usage: headgate vault "<question>" [vault_dir]')
+            return
+        var question = String(argv0[2])
+        var vdir = String(argv0[3]) if len(argv0) >= 4 else String("")
+        _run_vault(question, vdir^)
+        return
+
     # Config: ~/.config/headgate/config.json (+ env overrides). See settings.mojo.
     var cfg = load_config()
 

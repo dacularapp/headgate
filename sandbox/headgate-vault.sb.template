@@ -1,0 +1,85 @@
+;; headgate VAULT code-runner confinement — macOS Seatbelt (sandbox-exec) profile.
+;;
+;; Like headgate.sb.template (the CSV path), this is the CONTAINMENT half: the
+;; frontier-written program runs under this profile so it cannot exfiltrate
+;; private data or tamper with the host. The ONE difference from the CSV profile
+;; is network: the vault tools (`search`, `ask_local`) HTTP to the on-device
+;; inference-server(s), so this profile permits *loopback only* — outbound TCP to
+;; 127.0.0.1 / localhost — while denying every other network destination. The
+;; program can reach any LOCAL model port but still cannot phone home, so the
+;; confidentiality invariant holds: real content is read by the local model and
+;; the answer is printed locally; nothing reaches the public internet.
+;;
+;; Placeholders are substituted by the runner (src/sandbox.mojo) with CANONICAL
+;; (symlink-resolved) absolute paths:
+;;   @DATA_DIR@        read-only mount of the vault (the real files the tools read)
+;;   @SCRATCH_DIR@     the only writable location (the rendered profile + capture)
+;;   @HOME@            the invoking user's home — denied (credentials/keys/projects)
+;;   @RUNTIME_PREFIX@  the pixi env (CONDA_PREFIX) — the Mojo runtime + the FFI
+;;                     shims (libflare_tls / liblancedbmojo / libzlibmojo) the
+;;                     program dlopen's at run time, AND the cacert bundle TLS
+;;                     would need — all under $CONDA_PREFIX, re-allowed below.
+;;   @INDEX_DIR@       the LanceDB index dir (~/.config/dacular) — the vector
+;;                     store + chunks.tsv side-table search() reads. Under $HOME,
+;;                     so it must be re-allowed after the $HOME deny.
+;;
+;; Honest limitation (same as headgate.sb.template): read-scoping is blocklist
+;; style (deny @HOME@) over bsd.sb's broad system-read allow; a determined reader
+;; could still reach world-readable paths outside @HOME@. The loopback allowance
+;; is the new surface — see SPIKE/the vault negative test that non-localhost is
+;; still denied. For a hard guarantee, escalate to the microVM tier.
+
+(version 1)
+
+;; Baseline mach/IPC bootstrap (a deny-default process can't even start without it).
+(import "/System/Library/Sandbox/Profiles/bsd.sb")
+
+;; Let the generated binary load + run — system libraries / dyld only.
+(allow process-fork)
+(allow process-exec*)
+(allow file-read* file-map-executable
+  (subpath "/usr/lib")
+  (subpath "/usr/bin")
+  (subpath "/bin")
+  (subpath "/System"))
+;; Resolver/system config the loopback HTTP client may stat/read (DNS resolver
+;; conf, hosts, localtime). Read-only, world-readable system config — NOT user
+;; data, and grants no egress (the network rule below is what bounds the wire).
+(allow file-read*
+  (subpath "/private/etc")
+  (subpath "/etc")
+  (literal "/private/var/run/resolv.conf"))
+
+;; ── PRIMARY CONTAINMENT: network = LOOPBACK ONLY ─────────────────────────────
+;; Deny all network first ...
+(deny network*)
+;; ... then re-allow ONLY outbound to the local host (any port), so the program
+;; can reach the inference-server(s) on 127.0.0.1:8000 (chat) and 127.0.0.1:8001
+;; (embeddings) — but NOTHING else. In the Seatbelt dialect the host in a network
+;; address MUST be `*` or `localhost` (a numeric IP literal is rejected at profile
+;; load); `localhost` denotes the loopback interface, covering 127.0.0.1 and ::1.
+;; `(local ...)` is NOT granted, so the program cannot listen/serve either. This
+;; is the single control that lets the vault tools work while still making
+;; exfiltration impossible (last match wins).
+(allow network-outbound (remote ip "localhost:*"))
+;; Unix-domain sockets stay available (local IPC: DNS resolver handoff, etc. —
+;; this does NOT widen the off-box egress surface, which `(deny network*)` above
+;; still covers for every non-localhost destination).
+(allow network-outbound (remote unix-socket))
+
+;; No writes anywhere except scratch (the rendered profile + the run capture).
+(deny file-write*)
+(allow file-write* (subpath "@SCRATCH_DIR@"))
+
+;; ── DEFENSE-IN-DEPTH: read-scoping ───────────────────────────────────────────
+;; Deny the user's home (credentials, keys, browser data, other projects) ...
+(deny file-read* (subpath "@HOME@"))
+;; ... re-allow the language runtime/toolchain + FFI shims (pixi env under $HOME)
+;; so the binary can dlopen libflare_tls / liblancedbmojo / libzlibmojo and load
+;; the TLS cacert bundle. Comes after the $HOME deny so it wins (last match wins).
+(allow file-read* file-map-executable (subpath "@RUNTIME_PREFIX@"))
+(allow file-read* (subpath "@RUNTIME_PREFIX@"))
+;; ... re-allow the LanceDB index dir + chunks.tsv side-table (search reads it).
+(allow file-read* (subpath "@INDEX_DIR@"))
+;; ... and allow the scoped vault dir, read-only (the real files the tools read).
+(allow file-read* (subpath "@DATA_DIR@"))
