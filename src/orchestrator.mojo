@@ -67,6 +67,67 @@ struct Orchestrator(Movable):
         self.budget.charge(g.tokens)
         return g.code.copy()
 
+    # ── vault pipeline (steps) ──────────────────────────────────────────────────
+    # The full flow is run_vault_task; it's split into these public steps so the
+    # streaming WS server (app/server) can emit status/debug between them and gate
+    # step 4 on the user's approval. The CLI + the unary HTTP server call
+    # run_vault_task and are unaffected.
+
+    def vault_manifest(mut self, vault_dir: String) raises -> String:
+        """Step 1 — the ALIASED, frontier-safe manifest. Shell out to the trusted
+        `veilens manifest <vault_dir>` and capture its stdout. This is the ONLY
+        vault info that reaches the remote model, aliases-only by construction."""
+        var dac = veilens_bin()
+        var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
+        var m = self.sandbox.capture(manifest_argv)
+        if m.exit_code != 0:
+            raise Error(
+                "vault: `veilens manifest` failed (is veilens built at " + dac
+                + "? try `pixi run build` in veilens). Output:\n" + m.output)
+        return m.output.copy()
+
+    def vault_codegen(mut self, question: String, manifest: String) raises -> String:
+        """Step 2 — ask the model (budget-routed; EgressGuard-checked inside
+        _codegen) for a `from vault import *` program from the question + the
+        aliased manifest. The system prompt is resources/headgate-system.md."""
+        var msgs = List[ChatMessage]()
+        msgs.append(ChatMessage(String("user"),
+            String("Question: ") + question
+            + "\n\nVault manifest (aliases only — you never see real content):\n"
+            + manifest
+            + "\n\nWrite the Mojo program (`from vault import *`) that answers it."))
+        return self._codegen(msgs)
+
+    def vault_build(mut self, code: String) raises:
+        """Step 3 — compile with the vault include paths, looping the fix on
+        COMPILE errors ONLY (the code is aliased, so compiler errors are safe to
+        feed back; a RUNTIME error could carry real content and is never sent
+        upstream). Leaves the compiled binary in scratch; raises if it never
+        compiles."""
+        var work = code.copy()
+        var includes = vault_include_paths()
+        var compiled = self.sandbox.compile(work, includes)
+        var attempt = 0
+        while compiled.exit_code != 0 and attempt < self.max_fix_attempts:
+            work = self._fix(work, compiled.output)   # budget-routed; guarded; aliased
+            compiled = self.sandbox.compile(work, includes)
+            attempt += 1
+        if compiled.exit_code != 0:
+            raise Error(
+                "vault: generated program did not compile after "
+                + String(self.max_fix_attempts) + " fix attempt(s). Last error:\n"
+                + compiled.output)
+
+    def vault_run(mut self, vault_dir: String) raises -> String:
+        """Step 4 — run the compiled binary in the LOOPBACK sandbox over the REAL
+        data (network-denied EXCEPT 127.0.0.1, so search()/ask_local() reach the
+        local models but the program cannot phone home). VEILENS_VAULT points the
+        tools at the vault dir. Returns stdout (print_answer) — local; a runtime
+        error surfaces here and is NEVER fed upstream."""
+        _ = setenv("VEILENS_VAULT", vault_dir, True)
+        var bin = self.sandbox.scratch_bin()
+        return self.sandbox.run(bin, List[String]()).output.copy()
+
     def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program
         that does `from vault import *` and calls the vault tools, compiling it
@@ -91,70 +152,11 @@ struct Orchestrator(Movable):
             other network); the answer is printed locally and returned here.
 
         So: aliases out, code back, run local over real data, answer local. The
-        real content is touched only by the on-device tools, never the frontier."""
-        # 1. The aliased manifest — the frontier-safe view. Shell out to the
-        #    trusted `veilens manifest <vault_dir>` and capture its stdout. This
-        #    is the ONLY vault info that will reach the remote model, and it is
-        #    aliases-only by construction.
-        var dac = veilens_bin()
-        var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
-        var m = self.sandbox.capture(manifest_argv)
-        if m.exit_code != 0:
-            raise Error(
-                "vault: `veilens manifest` failed (is veilens built at " + dac
-                + "? try `pixi run build` in veilens). Output:\n" + m.output)
-        var manifest = m.output.copy()
+        real content is touched only by the on-device tools, never the frontier.
 
-        # 2. Codegen. The system prompt IS resources/headgate-system.md (loaded as
-        #    the Anthropic system field / prepended locally by transport) — it
-        #    documents the vault tools + the confidentiality contract. We do NOT
-        #    add the CSV "read the CSV at __DATA_CSV__" system message here (it
-        #    would conflict). We send ONLY the aliased manifest + the question as
-        #    the user turn. Each outbound message clears the EgressGuard.
-        var msgs = List[ChatMessage]()
-        msgs.append(ChatMessage(String("user"),
-            String("Question: ") + question
-            + "\n\nVault manifest (aliases only — you never see real content):\n"
-            + manifest
-            + "\n\nWrite the Mojo program (`from vault import *`) that answers it."))
-        var code = self._codegen(msgs)
-
-        # 3. Compile with the vault include paths so `from vault import *` + its
-        #    transitive deps resolve. On a compile error, feed the (aliased) error
-        #    back to the model and retry — same fix loop as the CSV path. The code
-        #    is already in terms of aliases, so there is no dealias step.
-        #
-        #    CONFIDENTIALITY NOTE — why this loops on COMPILE errors ONLY, never
-        #    RUNTIME errors (the CSV path can loop on both, because its synthetic
-        #    run uses fake data): a vault RUNTIME error can contain REAL content —
-        #    e.g. an ask_local reply derived from a real chunk, or a real value in
-        #    a stack trace. That content was seen only by the on-device model and
-        #    must NOT be fed back to the remote (frontier) fixer. Compiler errors,
-        #    by contrast, reference only the aliased SOURCE (col_0, file_0) and are
-        #    safe. So we iterate compilation, but a runtime failure surfaces raw to
-        #    the user (local) and is never sent upstream. (The EgressGuard would
-        #    fail closed on a fingerprint, but with no per-file fingerprints on the
-        #    vault path, not looping on runtime errors is the load-bearing control.)
-        var includes = vault_include_paths()
-        var compiled = self.sandbox.compile(code, includes)
-        var attempt = 0
-        while compiled.exit_code != 0 and attempt < self.max_fix_attempts:
-            code = self._fix(code, compiled.output)   # budget-routed; guarded; aliased
-            compiled = self.sandbox.compile(code, includes)
-            attempt += 1
-        if compiled.exit_code != 0:
-            raise Error(
-                "vault: generated program did not compile after "
-                + String(self.max_fix_attempts) + " fix attempt(s). Last error:\n"
-                + compiled.output)
-
-        # 4. Run the compiled binary in the LOOPBACK sandbox (network-denied EXCEPT
-        #    127.0.0.1, so search()/ask_local() reach the local models but the
-        #    program still cannot phone home). VEILENS_VAULT points the tools at
-        #    the real vault dir (inherited by the child via the process environ);
-        #    the program reads it ONLY through the tools. The sandbox policy is in
-        #    "loopback" mode (wired in build_vault_orchestrator), so run() renders
-        #    the vault profile. Return stdout (the print_answer output) — local.
-        _ = setenv("VEILENS_VAULT", vault_dir, True)
-        var bin = self.sandbox.scratch_bin()
-        return self.sandbox.run(bin, List[String]()).output.copy()
+        Auto-approved wrapper over the steps above; the WS server runs the steps
+        directly to stream status/debug and gate the run on user approval."""
+        var manifest = self.vault_manifest(vault_dir)
+        var code = self.vault_codegen(question, manifest)
+        self.vault_build(code)
+        return self.vault_run(vault_dir)
