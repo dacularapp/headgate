@@ -158,7 +158,7 @@ def main() raises:
     var cfg = load_config()
 
     # VAULT-ONLY: build the vault orchestrator over the resolved vault dir
-    # (HEADGATE_VAULT_DIR / $DACULAR_VAULT / $HEADGATE_DATA / ~/dacular) and route
+    # (HEADGATE_VAULT_DIR / $VEILENS_VAULT / $HEADGATE_DATA / ~/veilens) and route
     # /chat to run_vault_task.
     var vault_dir = resolve_vault_dir()
     print("headgate VAULT mode — vault dir: " + vault_dir)

@@ -19,7 +19,7 @@
 ;;                     shims (libflare_tls / liblancedbmojo / libzlibmojo) the
 ;;                     program dlopen's at run time, AND the cacert bundle TLS
 ;;                     would need — all under $CONDA_PREFIX, re-allowed below.
-;;   @INDEX_DIR@       the LanceDB index dir (~/.config/dacular) — the vector
+;;   @INDEX_DIR@       the LanceDB index dir (~/.config/veilens) — the vector
 ;;                     store + chunks.tsv side-table search() reads. Under $HOME,
 ;;                     so it must be re-allowed after the $HOME deny.
 ;;

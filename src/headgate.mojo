@@ -1,5 +1,5 @@
 """headgate — CLI entry point. The private-VAULT harness: a frontier model writes
-a Mojo program that uses the dacular vault tools; it runs locally over the real
+a Mojo program that uses the veilens vault tools; it runs locally over the real
 data and only the printed answer surfaces.
 
 Layering (pi-shaped, PRIOR-ART.md):
@@ -17,12 +17,12 @@ Layering (pi-shaped, PRIOR-ART.md):
 Usage:
     headgate vault "<question>" [dir]  answer a question about your private VAULT
                                        (CSV/PDF/Markdown). The frontier model writes
-                                       a Mojo program that uses the dacular vault
+                                       a Mojo program that uses the veilens vault
                                        tools; it runs locally over the real data and
                                        only the printed answer surfaces.
 
-The vault dir defaults to $DACULAR_VAULT, else $HEADGATE_DATA, else ~/dacular.
-Index it first with `dacular index <dir>` (needs the embedding server live).
+The vault dir defaults to $VEILENS_VAULT, else $HEADGATE_DATA, else ~/veilens.
+Index it first with `veilens index <dir>` (needs the embedding server live).
 """
 
 from std.sys import argv
@@ -34,17 +34,17 @@ from wiring import build_vault_orchestrator
 
 def _vault_dir(var arg: String) raises -> String:
     """Resolve the vault dir for the `vault` subcommand: an explicit CLI arg wins,
-    then $DACULAR_VAULT, then $HEADGATE_DATA, then ~/dacular (dacular's own
-    default). Kept consistent with dacular/src/vault.mojo `_vault_dir()`."""
+    then $VEILENS_VAULT, then $HEADGATE_DATA, then ~/veilens (veilens's own
+    default). Kept consistent with veilens/src/vault.mojo `_vault_dir()`."""
     if arg != "":
         return arg^
-    var d = getenv("DACULAR_VAULT", "")
+    var d = getenv("VEILENS_VAULT", "")
     if d != "":
         return d
     d = getenv("HEADGATE_DATA", "")
     if d != "":
         return d
-    return getenv("HOME", ".") + "/dacular"
+    return getenv("HOME", ".") + "/veilens"
 
 
 def _run_vault(question: String, var vault_dir: String) raises:
@@ -70,5 +70,5 @@ def main() raises:
 
     print('usage: headgate vault "<question>" [vault_dir]')
     print("  Answer a question about your private VAULT (CSV/PDF/Markdown).")
-    print("  Index it first with `dacular index <dir>` (embedding server live).")
-    print("  The vault dir defaults to $DACULAR_VAULT, else $HEADGATE_DATA, else ~/dacular.")
+    print("  Index it first with `veilens index <dir>` (embedding server live).")
+    print("  The vault dir defaults to $VEILENS_VAULT, else $HEADGATE_DATA, else ~/veilens.")

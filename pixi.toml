@@ -44,7 +44,7 @@ flare-ffi = "bash -c 'source ../flare/flare/tls/ffi/build.sh; source ../flare/fl
 # time, into THIS env's $CONDA_PREFIX/lib: libzlibmojo (PDF FlateDecode) +
 # liblancedbmojo (the on-device vector store search() queries). flare's shims come
 # from flare-ffi. Without these the loopback-sandboxed vault binary fails to
-# dlopen liblancedbmojo/libzlibmojo. Mirrors dacular/pixi.toml's `ffi` task, but
+# dlopen liblancedbmojo/libzlibmojo. Mirrors veilens/pixi.toml's `ffi` task, but
 # installs into headgate's env (where the generated binary loads its dylibs).
 vault-ffi = { cmd = "bash -c 'bash ../zlib.mojo/src/ffi/build.sh; bash ../lancedb.mojo/ffi/build.sh'", depends-on = ["flare-ffi"] }
 

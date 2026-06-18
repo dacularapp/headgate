@@ -3,7 +3,7 @@
 \*\*A privacy harness: use a frontier model to write code that runs on private
 data locally — the data never leaves the machine.\*\*
 
-> Part of [**dacular.app**](https://dacular.app) using
+> Part of [**veilens.app**](https://veilens.app) using
 > [**millrace**](https://millrace.app) — local-first AI on Apple Silicon.
 > **Experimental.**
 
@@ -99,7 +99,7 @@ pixi.toml                             Mojo nightly + flare/jinja2.mojo wiring; `
 sandbox/headgate.sb.template          PROVEN Seatbelt confinement profile
 sandbox/spike.sh                      6/6-passing containment proof (no toolchain needed)
 src/egress.mojo                       EgressGuard — outbound confidentiality chokepoint
-src/vaultcfg.mojo                     dacular vault paths (manifest bin, -I set, index dir)
+src/vaultcfg.mojo                     veilens vault paths (manifest bin, -I set, index dir)
 src/transport.mojo                    Local/Remote clients (remote gated by EgressGuard)
 src/sandbox.mojo + src/broker.mojo    containment runner + capability allowlist
 src/orchestrator.mojo                 core loop: aliased manifest → codegen → loopback run

@@ -2,11 +2,11 @@
 
 VAULT-ONLY. Wires the layers into the privacy flow (README.md):
 
-  1. `dacular manifest` produces the ALIASED view (the only vault info the remote
+  1. `veilens manifest` produces the ALIASED view (the only vault info the remote
      model sees — never a real name, value, or path).
   2. RemoteClient.codegen writes a `from vault import *` program from that (every
      outbound message passes the EgressGuard — confidentiality enforced here).
-  3. compile it (with the dacular include paths), looping the fix on COMPILE
+  3. compile it (with the veilens include paths), looping the fix on COMPILE
      errors only; the code is in terms of aliases, so there is no dealias step.
   4. run the program in the loopback Sandbox over REAL data; only the printed
      answer surfaces. search()/ask_local() reach 127.0.0.1 only.
@@ -20,7 +20,7 @@ from budget import Budget
 from transport import LocalClient, RemoteClient, ChatMessage
 from sandbox import Sandbox
 from broker import CapabilityBroker
-from vaultcfg import dacular_bin, vault_include_paths
+from vaultcfg import veilens_bin, vault_include_paths
 
 
 struct Orchestrator(Movable):
@@ -70,7 +70,7 @@ struct Orchestrator(Movable):
     def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program
         that does `from vault import *` and calls the vault tools, compiling it
-        with the dacular include paths, and running it in the loopback sandbox
+        with the veilens include paths, and running it in the loopback sandbox
         over the REAL data. Only the printed answer surfaces.
 
         This is the existing confidentiality model extended from "read one CSV" to
@@ -78,8 +78,8 @@ struct Orchestrator(Movable):
 
           - The ONLY vault information that reaches the remote (frontier) model is
             the ALIASED manifest (`file_0 [csv] 130 bytes  schema: col_0, col_1`)
-            produced by `dacular manifest` — aliases/kinds/sizes/aliased columns,
-            never a real name, value, or path (see dacular/src/manifest.mojo).
+            produced by `veilens manifest` — aliases/kinds/sizes/aliased columns,
+            never a real name, value, or path (see veilens/src/manifest.mojo).
           - The question is the user's to send; the data is not. Every outbound
             message still passes the EgressGuard inside codegen()/fix_code()
             (fails closed) — a real value leaking into the manifest would trip it.
@@ -93,16 +93,16 @@ struct Orchestrator(Movable):
         So: aliases out, code back, run local over real data, answer local. The
         real content is touched only by the on-device tools, never the frontier."""
         # 1. The aliased manifest — the frontier-safe view. Shell out to the
-        #    trusted `dacular manifest <vault_dir>` and capture its stdout. This
+        #    trusted `veilens manifest <vault_dir>` and capture its stdout. This
         #    is the ONLY vault info that will reach the remote model, and it is
         #    aliases-only by construction.
-        var dac = dacular_bin()
+        var dac = veilens_bin()
         var manifest_argv: List[String] = [dac, String("manifest"), vault_dir]
         var m = self.sandbox.capture(manifest_argv)
         if m.exit_code != 0:
             raise Error(
-                "vault: `dacular manifest` failed (is dacular built at " + dac
-                + "? try `pixi run build` in dacular). Output:\n" + m.output)
+                "vault: `veilens manifest` failed (is veilens built at " + dac
+                + "? try `pixi run build` in veilens). Output:\n" + m.output)
         var manifest = m.output.copy()
 
         # 2. Codegen. The system prompt IS resources/headgate-system.md (loaded as
@@ -150,11 +150,11 @@ struct Orchestrator(Movable):
 
         # 4. Run the compiled binary in the LOOPBACK sandbox (network-denied EXCEPT
         #    127.0.0.1, so search()/ask_local() reach the local models but the
-        #    program still cannot phone home). DACULAR_VAULT points the tools at
+        #    program still cannot phone home). VEILENS_VAULT points the tools at
         #    the real vault dir (inherited by the child via the process environ);
         #    the program reads it ONLY through the tools. The sandbox policy is in
         #    "loopback" mode (wired in build_vault_orchestrator), so run() renders
         #    the vault profile. Return stdout (the print_answer output) — local.
-        _ = setenv("DACULAR_VAULT", vault_dir, True)
+        _ = setenv("VEILENS_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
         return self.sandbox.run(bin, List[String]()).output.copy()

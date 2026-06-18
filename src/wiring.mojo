@@ -39,7 +39,7 @@ def build_vault_orchestrator(cfg: Config, vault_dir: String) raises -> Orchestra
       - the EgressGuard is fingerprinted from NO real content — the vault path
         never reads real values into the guard; it sends only the ALIASED
         manifest. The guard still blocks canary tokens and any configured secret,
-        and the manifest is aliases-only by construction (dacular/manifest.mojo),
+        and the manifest is aliases-only by construction (veilens/manifest.mojo),
         so confidentiality holds without per-file fingerprints. (search/ask_local
         results never go upstream — they print locally.)"""
     var scratch = scratch_dir()
