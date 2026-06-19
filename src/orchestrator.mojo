@@ -14,13 +14,35 @@ VAULT-ONLY. Wires the layers into the privacy flow (README.md):
 See run_vault_task for the full confidentiality argument.
 """
 
-from std.os import setenv
+from std.os import getenv, setenv
 
 from budget import Budget
-from transport import LocalClient, RemoteClient, ChatMessage
+from transport import LocalClient, RemoteClient, ChatMessage, _codegen_system
 from sandbox import Sandbox
 from broker import CapabilityBroker
 from vaultcfg import veilens_bin, vault_include_paths
+
+
+def _session_append(text: String):
+    """Append `text` to the session transcript at $VEILENS_SESSION_LOG (set by the
+    CLI per `ask`), best-effort. Captures the full outside-model exchange — prompt
+    + program — for after-the-fact inspection. No-op when the env var is unset."""
+    var path = getenv("VEILENS_SESSION_LOG", "")
+    if path == "":
+        return
+    # Read-modify-write (this Mojo's open() is only known to support "r"/"w", not
+    # append) — fine for a small per-session transcript.
+    var existing = String("")
+    try:
+        with open(path, "r") as f:
+            existing = f.read()
+    except:
+        existing = String("")
+    try:
+        with open(path, "w") as f:
+            f.write(existing + text)
+    except:
+        pass
 
 
 struct Orchestrator(Movable):
@@ -91,14 +113,21 @@ struct Orchestrator(Movable):
         """Step 2 — ask the model (budget-routed; EgressGuard-checked inside
         _codegen) for a `from vault import *` program from the question + the
         aliased manifest. The system prompt is resources/headgate-system.md."""
-        print("• asking the model to write the program…")
-        var msgs = List[ChatMessage]()
-        msgs.append(ChatMessage(String("user"),
+        print("• asking the outside model to write the program…")
+        var user_msg = (
             String("Question: ") + question
             + "\n\nVault manifest (aliases only — you never see real content):\n"
             + manifest
-            + "\n\nWrite the Mojo program (`from vault import *`) that answers it."))
-        return self._codegen(msgs)
+            + "\n\nWrite the Mojo program (`from vault import *`) that answers it.")
+        var msgs = List[ChatMessage]()
+        msgs.append(ChatMessage(String("user"), user_msg))
+        var code = self._codegen(msgs)
+        _session_append(
+            "QUESTION: " + question
+            + "\n\n===== SYSTEM PROMPT =====\n" + _codegen_system()
+            + "\n\n===== PROMPT TO THE OUTSIDE MODEL (user turn) =====\n" + user_msg
+            + "\n\n===== OUTSIDE MODEL OUTPUT (program) =====\n" + code + "\n")
+        return code
 
     def vault_build(mut self, code: String) raises:
         """Step 3 — compile with the vault include paths, looping the fix on
@@ -130,7 +159,9 @@ struct Orchestrator(Movable):
         print("• running it locally over your vault…")
         _ = setenv("VEILENS_VAULT", vault_dir, True)
         var bin = self.sandbox.scratch_bin()
-        return self.sandbox.run(bin, List[String]()).output.copy()
+        var out = self.sandbox.run(bin, List[String]()).output.copy()
+        _session_append("\n===== RESULT (local — never sent upstream) =====\n" + out + "\n")
+        return out
 
     def run_vault_task(mut self, question: String, vault_dir: String) raises -> String:
         """Answer a question about the private vault by writing ONE Mojo program
