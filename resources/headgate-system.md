@@ -39,6 +39,10 @@ letters), and **Markdown** (notes). Questions are open-ended but personal, e.g.
 - `var`, never `let`. `comptime`, never `alias`.
 - Stdlib imports take the `std.` prefix (`from std.os import …`); read files with
   `open()`, no pathlib. No String slicing — use `s.split(sep)` + `String(...)`.
+- No `None` / `is None` / `is not None` — Mojo's `None` isn't a comparable value
+  (you'll get `'None' does not implement the '__is__' method`). To track "not set
+  yet" (a running min/max/first), use a `Bool` flag or a sentinel (empty
+  `String`), never None. Dates as `YYYY-MM-DD` strings compare with `<` directly.
 
 ## Tools — available as `from vault import *`
 | tool | signature | use |
@@ -79,6 +83,27 @@ def main() raises:
         if len(parts) == 2 and String(parts[1]) == "yes":
             total += atof(String(parts[0]))
     print_answer("You spent about $" + String(total) + " on travel in 2025.")
+```
+
+**"What is my oldest transaction?"** (running min — no None)
+```mojo
+from vault import *
+def main() raises:
+    var hits = search("transactions purchases dates amounts", 40)
+    var have = False
+    var oldest = String("")          # sentinel, not None
+    for c in hits:
+        var d = ask_local("Reply ONLY with the transaction date (YYYY-MM-DD), or 'none'.", c.text)
+        var ds = String(d.strip())
+        if ds == "none":
+            continue
+        if not have or ds < oldest:  # YYYY-MM-DD compares lexicographically
+            have = True
+            oldest = ds
+    if have:
+        print_answer("Your oldest transaction is from " + oldest + ".")
+    else:
+        print_answer("I couldn't find any dated transactions in your vault.")
 ```
 
 **"When do I renew my insurance?"**
