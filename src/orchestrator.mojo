@@ -30,17 +30,9 @@ def _session_append(text: String):
     var path = getenv("VEILENS_SESSION_LOG", "")
     if path == "":
         return
-    # Read-modify-write (this Mojo's open() is only known to support "r"/"w", not
-    # append) — fine for a small per-session transcript.
-    var existing = String("")
     try:
-        with open(path, "r") as f:
-            existing = f.read()
-    except:
-        existing = String("")
-    try:
-        with open(path, "w") as f:
-            f.write(existing + text)
+        with open(path, "a") as f:   # append mode (validated); creates if absent
+            f.write(text)
     except:
         pass
 
