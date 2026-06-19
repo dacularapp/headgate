@@ -30,7 +30,7 @@ struct Orchestrator(Movable):
     var broker: CapabilityBroker
     var budget: Budget               # remote-API token budget; routes to local when depleted
     var use_local_summary: Bool      # have the local model summarize the result
-    var max_fix_attempts: Int        # compile-feedback retries before giving up
+    var max_fix_attempts: Int        # compile-feedback retries (compile errors only) before giving up
 
     def __init__(
         out self,
@@ -47,7 +47,7 @@ struct Orchestrator(Movable):
         self.broker = broker^
         self.budget = budget^
         self.use_local_summary = use_local_summary
-        self.max_fix_attempts = 3
+        self.max_fix_attempts = 6
 
     def _codegen(mut self, messages: List[ChatMessage]) raises -> String:
         """Route code generation: the remote frontier model while budget remains,
